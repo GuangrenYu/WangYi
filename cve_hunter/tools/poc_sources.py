@@ -29,7 +29,7 @@ def search_nuclei(cve_id: str) -> dict:
     url = f"{_NUCLEI_RAW}/{year}/{cve_lower}.yaml"
 
     try:
-        resp = httpx.get(url, timeout=cfg.request_timeout, follow_redirects=True)
+        resp = httpx.get(url, timeout=cfg.request_timeout, follow_redirects=True, proxy=cfg.httpx_proxy)
         if resp.status_code == 200:
             content = resp.text
             try:
@@ -71,6 +71,7 @@ def search_exploitdb(cve_id: str) -> dict:
             },
             timeout=cfg.request_timeout,
             follow_redirects=True,
+            proxy=cfg.httpx_proxy,
         )
         if resp.status_code == 200:
             try:
@@ -106,6 +107,7 @@ def search_imfht(cve_id: str) -> dict:
             url,
             timeout=cfg.request_timeout,
             follow_redirects=True,
+            proxy=cfg.httpx_proxy,
             headers={"User-Agent": "Mozilla/5.0"},
         )
         if resp.status_code == 200:

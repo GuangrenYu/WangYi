@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import time
+
 import httpx
 
 from cve_hunter.config import cfg
 
 NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
+
+_NVD_TIMEOUT = 60
+_NVD_MAX_RETRIES = 2
 
 
 def query_nvd(cve_id: str) -> dict:
@@ -14,18 +19,30 @@ def query_nvd(cve_id: str) -> dict:
 
     返回包含 description, references, affected_products, cvss 等字段的字典。
     """
-    headers = {}
+    headers = {"User-Agent": "CVEHunter/1.0"}
     if cfg.nvd_api_key:
         headers["apiKey"] = cfg.nvd_api_key
 
-    resp = httpx.get(
-        NVD_API,
-        params={"cveId": cve_id},
-        headers=headers,
-        timeout=cfg.request_timeout,
-    )
-    resp.raise_for_status()
-    data = resp.json()
+    last_err = None
+    for attempt in range(_NVD_MAX_RETRIES + 1):
+        try:
+            resp = httpx.get(
+                NVD_API,
+                params={"cveId": cve_id},
+                headers=headers,
+                timeout=_NVD_TIMEOUT,
+                proxy=cfg.httpx_proxy,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            break
+        except Exception as e:
+            last_err = e
+            if attempt < _NVD_MAX_RETRIES:
+                time.sleep(2 * (attempt + 1))
+            continue
+    else:
+        raise last_err  # type: ignore[misc]
 
     vulns = data.get("vulnerabilities", [])
     if not vulns:

@@ -9,6 +9,16 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def _get_proxy() -> str:
+    return (
+        os.getenv("HTTPS_PROXY")
+        or os.getenv("HTTP_PROXY")
+        or os.getenv("http_proxy")
+        or os.getenv("https_proxy")
+        or ""
+    )
+
+
 @dataclass(frozen=True)
 class Config:
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
@@ -33,6 +43,14 @@ class Config:
 
     # 目标 IP（用于 nuclei PoC 验证）
     target_ip: str = field(default_factory=lambda: os.getenv("TARGET_IP", "127.0.0.1"))
+
+    # HTTP/HTTPS 代理
+    proxy: str = field(default_factory=_get_proxy)
+
+    @property
+    def httpx_proxy(self) -> str | None:
+        """返回 httpx 可用的代理地址，无代理则 None。"""
+        return self.proxy or None
 
 
 cfg = Config()

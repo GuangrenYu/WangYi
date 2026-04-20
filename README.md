@@ -53,6 +53,11 @@ cp .env.example .env
 
 **必填项：**
 - `LLM_API_KEY` — 大模型 API Key（支持 DeepSeek、OpenAI 兼容接口）
+- `LLM_BASE_URL` — API 地址（默认 DeepSeek，也可用 `https://api.apiyi.com/v1` 等中转）
+- `LLM_MODEL` — 模型名称（如 `deepseek-chat`、`gpt-4o-mini`）
+
+**网络代理（国内服务器必配）：**
+- `HTTP_PROXY` / `HTTPS_PROXY` — 所有外部请求（NVD、GitHub、搜索等）均走此代理
 
 **可选项：**
 - `NVD_API_KEY` — 提升 NVD API 查询配额

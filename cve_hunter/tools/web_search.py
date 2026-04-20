@@ -50,6 +50,7 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
             headers={"User-Agent": "Mozilla/5.0"},
             timeout=cfg.request_timeout,
             follow_redirects=True,
+            proxy=cfg.httpx_proxy,
         )
         results = []
         import re

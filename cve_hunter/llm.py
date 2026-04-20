@@ -22,13 +22,16 @@ def get_llm():
     if _llm is None:
         if not _is_llm_available():
             return None
+        import httpx as _httpx
         from langchain_openai import ChatOpenAI
+        http_client = _httpx.Client(proxy=cfg.httpx_proxy) if cfg.httpx_proxy else None
         _llm = ChatOpenAI(
             model=cfg.llm_model,
             api_key=cfg.llm_api_key,
             base_url=cfg.llm_base_url,
             temperature=0.2,
             max_tokens=4096,
+            http_client=http_client,
         )
     return _llm
 

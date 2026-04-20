@@ -25,6 +25,7 @@ def _extract_via_service(url: str) -> dict[str, str]:
             f"{cfg.wayback_url.rstrip('/')}/extract",
             json={"url": url, "use_archive": True, "favor_recall": True},
             timeout=60,
+            proxy=cfg.httpx_proxy,
         )
         data = resp.json()
         if data.get("success"):
@@ -45,6 +46,7 @@ def _extract_builtin(url: str) -> dict[str, str]:
             url,
             timeout=cfg.request_timeout,
             follow_redirects=True,
+            proxy=cfg.httpx_proxy,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
