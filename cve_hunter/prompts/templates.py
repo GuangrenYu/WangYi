@@ -95,7 +95,9 @@ ANALYSIS_REPORT = """\
 
 ## 验证结果
 - HTTP 状态码: {http_status_code}
-- IPS 命中: {ips_matched}
+- 当前 CVE IPS 命中: {ips_matched}
+- 通用/非当前 CVE IPS 命中: {generic_ips_matched}
+- IPS 命中统计: {ips_match_summary}
 - PCAP 文件: {pcap_file_path}
 
 请输出 Markdown 格式的分析报告，包括：

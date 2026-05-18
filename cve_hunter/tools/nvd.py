@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import time
+import sys
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 
 import httpx
 
@@ -12,6 +15,79 @@ NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
 _NVD_TIMEOUT = 60
 _NVD_MAX_RETRIES = 2
+_NVD_RATE_LIMIT_MAX_ATTEMPTS = 3
+_NVD_RATE_LIMIT_INITIAL_DELAY = 30
+_NVD_RATE_LIMIT_MAX_DELAY = 300
+
+
+def _parse_retry_after(value: str | None) -> int | None:
+    """解析 Retry-After，返回需要等待的秒数。"""
+    if not value:
+        return None
+
+    value = value.strip()
+    if not value:
+        return None
+
+    if value.isdigit():
+        return max(1, int(value))
+
+    try:
+        retry_at = parsedate_to_datetime(value)
+        if retry_at.tzinfo is None:
+            retry_at = retry_at.replace(tzinfo=timezone.utc)
+        delay = int((retry_at - datetime.now(timezone.utc)).total_seconds())
+        return max(1, delay)
+    except Exception:
+        return None
+
+
+def _is_nvd_rate_limited(resp: httpx.Response) -> bool:
+    """判断 NVD 响应是否为频繁访问限流。"""
+    if resp.status_code == 429:
+        return True
+
+    if resp.status_code not in (403, 503):
+        return False
+
+    if resp.headers.get("Retry-After"):
+        return True
+
+    try:
+        body = resp.text.lower()
+    except Exception:
+        body = ""
+
+    rate_limit_markers = (
+        "rate limit",
+        "too many requests",
+        "quota",
+        "exceeded",
+        "request forbidden by administrative rules",
+        "temporarily unavailable",
+    )
+    return any(marker in body for marker in rate_limit_markers)
+
+
+def _nvd_rate_limit_sleep_seconds(resp: httpx.Response, attempt: int) -> int:
+    retry_after = _parse_retry_after(resp.headers.get("Retry-After"))
+    if retry_after is not None:
+        return retry_after
+
+    return min(
+        _NVD_RATE_LIMIT_INITIAL_DELAY * attempt,
+        _NVD_RATE_LIMIT_MAX_DELAY,
+    )
+
+
+def _print_rate_limit_retry(cve_id: str, delay: int, attempt: int) -> None:
+    output = sys.__stdout__ or sys.stdout
+    print(
+        f"NVD 访问触发限流，{delay}s 后重试 {cve_id} "
+        f"(第 {attempt} 次等待)",
+        file=output,
+        flush=True,
+    )
 
 
 def query_nvd(cve_id: str) -> dict:
@@ -23,8 +99,9 @@ def query_nvd(cve_id: str) -> dict:
     if cfg.nvd_api_key:
         headers["apiKey"] = cfg.nvd_api_key
 
-    last_err = None
-    for attempt in range(_NVD_MAX_RETRIES + 1):
+    retry_attempt = 0
+    rate_limit_attempt = 0
+    while True:
         try:
             resp = httpx.get(
                 NVD_API,
@@ -33,16 +110,27 @@ def query_nvd(cve_id: str) -> dict:
                 timeout=_NVD_TIMEOUT,
                 proxy=cfg.httpx_proxy,
             )
+            if _is_nvd_rate_limited(resp):
+                rate_limit_attempt += 1
+                if rate_limit_attempt > _NVD_RATE_LIMIT_MAX_ATTEMPTS:
+                    raise RuntimeError(
+                        f"NVD API 访问限流或配额耗尽: status={resp.status_code}, "
+                        f"retry_after={resp.headers.get('Retry-After', '')}"
+                    )
+                delay = _nvd_rate_limit_sleep_seconds(resp, rate_limit_attempt)
+                _print_rate_limit_retry(cve_id, delay, rate_limit_attempt)
+                time.sleep(delay)
+                continue
+
             resp.raise_for_status()
             data = resp.json()
             break
         except Exception as e:
-            last_err = e
-            if attempt < _NVD_MAX_RETRIES:
-                time.sleep(2 * (attempt + 1))
-            continue
-    else:
-        raise last_err  # type: ignore[misc]
+            if retry_attempt < _NVD_MAX_RETRIES:
+                retry_attempt += 1
+                time.sleep(2 * retry_attempt)
+                continue
+            raise
 
     vulns = data.get("vulnerabilities", [])
     if not vulns:

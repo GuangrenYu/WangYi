@@ -45,6 +45,8 @@ def search_nuclei(cve_id: str) -> dict:
                 "name": info.get("name", ""),
                 "severity": info.get("severity", ""),
             }
+        if resp.status_code not in (404,):
+            return {"found": False, "source": "nuclei", "error": f"nuclei 请求失败: HTTP {resp.status_code}"}
         return {"found": False, "source": "nuclei"}
     except Exception as e:
         return {"found": False, "source": "nuclei", "error": str(e)}
@@ -89,6 +91,8 @@ def search_exploitdb(cve_id: str) -> dict:
                     return {"found": True, "source": "exploit-db", "results": results}
             except Exception:
                 pass
+        if resp.status_code not in (404,):
+            return {"found": False, "source": "exploit-db", "error": f"Exploit-DB 请求失败: HTTP {resp.status_code}"}
         return {"found": False, "source": "exploit-db"}
     except Exception as e:
         return {"found": False, "source": "exploit-db", "error": str(e)}
@@ -120,6 +124,8 @@ def search_imfht(cve_id: str) -> dict:
                     "url": url,
                     "content": extracted,
                 }
+        if resp.status_code not in (404,):
+            return {"found": False, "source": "imfht", "error": f"imfht 请求失败: HTTP {resp.status_code}"}
         return {"found": False, "source": "imfht"}
     except Exception as e:
         return {"found": False, "source": "imfht", "error": str(e)}

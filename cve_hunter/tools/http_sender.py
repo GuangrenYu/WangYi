@@ -40,12 +40,11 @@ def send_poc_and_capture(
 def _send_via_http2pcap(raw_http: str) -> dict:
     """通过 http2pcap 服务发送原始 HTTP 请求。"""
     try:
-        resp = httpx.post(
-            f"{cfg.http2pcap_url.rstrip('/')}/api/http2pcap",
+        data = _post_http2pcap(
+            "/api/http2pcap",
             json={"raw_http": raw_http, "check_ips": True},
             timeout=60,
         )
-        data = resp.json()
         return {
             "success": data.get("success", False),
             "status_code": data.get("status_code", 0),
@@ -54,6 +53,8 @@ def _send_via_http2pcap(raw_http: str) -> dict:
             "pcap_download_url": data.get("pcap_download_url", ""),
             "ips_matches": data.get("ips_matches", []),
             "packet_count": data.get("packet_count", 0),
+            "error": data.get("error", ""),
+            "error_type": data.get("error_type", ""),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -62,8 +63,8 @@ def _send_via_http2pcap(raw_http: str) -> dict:
 def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str) -> dict:
     """通过 http2pcap 服务执行 nuclei PoC。"""
     try:
-        resp = httpx.post(
-            f"{cfg.http2pcap_url.rstrip('/')}/api/nuclei-poc",
+        data = _post_http2pcap(
+            "/api/nuclei-poc",
             json={
                 "yaml_content": yaml_content,
                 "target_url": target_url or f"http://{cfg.target_ip}",
@@ -71,7 +72,6 @@ def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str) -> dict:
             },
             timeout=120,
         )
-        data = resp.json()
         return {
             "success": data.get("success", False),
             "matched": data.get("matched", False),
@@ -80,9 +80,29 @@ def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str) -> dict:
             "ips_matches": data.get("ips_matches", []),
             "packet_count": data.get("packet_count", 0),
             "result_info": data.get("result_info", ""),
+            "error": data.get("error", ""),
+            "error_type": data.get("error_type", ""),
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def _post_http2pcap(path: str, *, json: dict, timeout: int) -> dict:
+    """调用 http2pcap 服务并返回 JSON 响应。
+
+    http2pcap/IPS 是内网服务，不能受 .env 中用于外部情报源的 HTTP_PROXY 影响。
+    """
+    url = f"{cfg.http2pcap_url.rstrip('/')}{path}"
+    resp = httpx.post(url, json=json, timeout=timeout, trust_env=False)
+
+    try:
+        return resp.json()
+    except ValueError as exc:
+        body = resp.text.replace("\r", "\\r").replace("\n", "\\n")[:500]
+        raise RuntimeError(
+            f"http2pcap 返回非 JSON 响应: status={resp.status_code}, "
+            f"content_type={resp.headers.get('content-type', '')}, body={body}"
+        ) from exc
 
 
 def _send_builtin(raw_http: str, target_url: str = "") -> dict:

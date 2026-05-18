@@ -2,9 +2,13 @@ __pycache__/
 *.pyc
 *.pyo
 .env
+.vscode/tasks.json
 output/
 *.pcap
 .DS_Store
 *.egg-info/
 dist/
 build/
+*.pdf
+*.zip
+工具资料/

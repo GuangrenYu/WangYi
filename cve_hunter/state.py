@@ -36,7 +36,11 @@ class CVEState:
     http_response_body: str = ""
     pcap_file_path: str = ""
     ips_matched: bool = False
+    generic_ips_matched: bool = False
     ips_match_details: list[dict[str, Any]] = field(default_factory=list)
+    cve_ips_match_details: list[dict[str, Any]] = field(default_factory=list)
+    generic_ips_match_details: list[dict[str, Any]] = field(default_factory=list)
+    ips_match_summary: dict[str, Any] = field(default_factory=dict)
 
     # ── 流程控制 ──
     current_phase: str = "init"

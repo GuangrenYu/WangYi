@@ -32,6 +32,9 @@ class Config:
     # http2pcap 外部服务地址（可选，不配置则使用内置 scapy 抓包）
     http2pcap_url: str = field(default_factory=lambda: os.getenv("HTTP2PCAP_URL", ""))
 
+    # 防火墙/IPS 检测接口地址（供 http2pcap 服务环境使用）
+    ips_api_url: str = field(default_factory=lambda: os.getenv("IPS_API_URL", ""))
+
     # wayback-cve 外部服务地址（可选，不配置则使用 httpx + trafilatura）
     wayback_url: str = field(default_factory=lambda: os.getenv("WAYBACK_URL", ""))
 

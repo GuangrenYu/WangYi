@@ -52,6 +52,7 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
             follow_redirects=True,
             proxy=cfg.httpx_proxy,
         )
+        resp.raise_for_status()
         results = []
         import re
 

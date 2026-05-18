@@ -27,6 +27,7 @@ def _extract_via_service(url: str) -> dict[str, str]:
             timeout=60,
             proxy=cfg.httpx_proxy,
         )
+        resp.raise_for_status()
         data = resp.json()
         if data.get("success"):
             return {
@@ -55,6 +56,7 @@ def _extract_builtin(url: str) -> dict[str, str]:
                 )
             },
         )
+        resp.raise_for_status()
         html = resp.text
         title = ""
         if "<title>" in html.lower():

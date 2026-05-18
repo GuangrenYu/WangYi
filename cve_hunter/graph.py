@@ -15,11 +15,11 @@ from pathlib import Path
 
 from langgraph.graph import StateGraph, END
 
+from cve_hunter.classifier import classify_http_vuln_from_info
 from cve_hunter.config import cfg
 from cve_hunter.state import CVEState
 from cve_hunter.llm import invoke_llm
 from cve_hunter.prompts.templates import (
-    VULN_TYPE_CHECK,
     POC_GENERATION_FROM_REFS,
     POC_GENERATION_FROM_SEARCH,
     ANALYSIS_REPORT,
@@ -29,6 +29,18 @@ from cve_hunter.tools.web_extract import extract_url_content
 from cve_hunter.tools.poc_sources import search_nuclei, search_exploitdb, search_imfht
 from cve_hunter.tools.web_search import search_web
 from cve_hunter.tools.http_sender import send_poc_and_capture
+from cve_hunter.ips_match import classify_ips_matches, summarize_ips_classification
+from cve_hunter.status_codes import (
+    AI_REPRODUCTION_FAILED,
+    CAPTURE_SUCCESS,
+    IPS_GENERIC_MATCH_ONLY,
+    NOT_HTTP_VULN,
+    PARAMETER_ERROR,
+    POC_NOT_FOUND,
+    classify_error,
+    make_status_update,
+    status_description,
+)
 
 from rich.console import Console
 
@@ -47,7 +59,7 @@ def node_validate_input(state: CVEState) -> dict:
     if not re.match(r"^CVE-\d{4}-\d{4,}$", cve_id):
         return {
             "status": "FAILURE",
-            "status_code": "PARAMETER_ERROR",
+            "status_code": PARAMETER_ERROR,
             "message": f"CVE 编号格式错误: {state.cve_id}",
         }
     return {"cve_id": cve_id, "current_phase": "nvd_query"}
@@ -59,9 +71,11 @@ def node_query_nvd(state: CVEState) -> dict:
     try:
         info = query_nvd(state.cve_id)
         if "error" in info:
+            hint = classify_error(info["error"], source="nvd")
             return {
                 "error_messages": state.error_messages + [info["error"]],
                 "nvd_description": "",
+                **make_status_update(state.status_code, hint.code, hint.message),
                 "current_phase": "vuln_type_check",
             }
         console.print(f"  [green]✓[/] CVSS={info['cvss_score']} refs={len(info['references'])}")
@@ -74,9 +88,11 @@ def node_query_nvd(state: CVEState) -> dict:
             "current_phase": "vuln_type_check",
         }
     except Exception as e:
+        hint = classify_error(e, source="nvd")
         console.print(f"  [red]✗ NVD 查询失败:[/] {e}")
         return {
             "error_messages": state.error_messages + [f"NVD 查询失败: {e}"],
+            **make_status_update(state.status_code, hint.code, hint.message),
             "current_phase": "vuln_type_check",
         }
 
@@ -89,29 +105,33 @@ def node_vuln_type_check(state: CVEState) -> dict:
         console.print("  [yellow]⚠ 无 NVD 描述，默认为 HTTP 漏洞继续处理[/]")
         return {"is_http_vuln": True, "vuln_type": "未知", "current_phase": "reference_analysis"}
 
-    prompt = VULN_TYPE_CHECK.format(
+    result = classify_http_vuln_from_info(
         cve_id=state.cve_id,
         description=state.nvd_description,
+        references=state.nvd_references,
+        affected_products=state.affected_products,
         cvss_score=state.cvss_score,
         cvss_severity=state.cvss_severity,
-        affected_products=", ".join(state.affected_products[:5]),
     )
-
-    try:
-        result = invoke_llm(prompt)
-        cleaned = re.sub(r"```json\s*|\s*```", "", result).strip()
-        data = json.loads(cleaned)
-        is_http = data.get("is_http_vuln", True)
-        vuln_type = data.get("vuln_type", "未知")
-        console.print(f"  [green]✓[/] is_http={is_http} type={vuln_type}")
-        return {
-            "is_http_vuln": is_http,
-            "vuln_type": vuln_type,
+    if result.error:
+        console.print(f"  [yellow]⚠ {result.error}[/]")
+        updates = {
+            "is_http_vuln": result.is_http_vuln,
+            "vuln_type": result.vuln_type,
             "current_phase": "reference_analysis",
+            "error_messages": state.error_messages + [result.error],
         }
-    except Exception as e:
-        console.print(f"  [yellow]⚠ AI 判断解析失败，默认继续:[/] {e}")
-        return {"is_http_vuln": True, "vuln_type": "未知", "current_phase": "reference_analysis"}
+        if "AI 判断" in result.error:
+            hint = classify_error(result.error, source="llm")
+            updates.update(make_status_update(state.status_code, hint.code, hint.message))
+        console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type}")
+        return updates
+    console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type}")
+    return {
+        "is_http_vuln": result.is_http_vuln,
+        "vuln_type": result.vuln_type,
+        "current_phase": "reference_analysis",
+    }
 
 
 def node_reference_analysis(state: CVEState) -> dict:
@@ -121,18 +141,27 @@ def node_reference_analysis(state: CVEState) -> dict:
         return {"current_phase": "poc_from_refs", "phases_tried": state.phases_tried + ["reference_analysis"]}
 
     contents = []
+    errors = []
     for i, url in enumerate(state.nvd_references[:8]):
         console.print(f"  [{i+1}] {url[:80]}...")
         result = extract_url_content(url)
         if result.get("content"):
             contents.append({"url": url, "title": result.get("title", ""), "content": result["content"][:3000]})
+        elif result.get("error"):
+            errors.append(f"{url}: {result.get('error')}")
 
     console.print(f"  [green]✓[/] 成功提取 {len(contents)} 个页面内容")
-    return {
+    updates = {
         "reference_contents": contents,
         "current_phase": "poc_from_refs",
         "phases_tried": state.phases_tried + ["reference_analysis"],
     }
+    if errors:
+        updates["error_messages"] = state.error_messages + errors[:3]
+        if not contents:
+            hint = classify_error(errors[0], source="reference")
+            updates.update(make_status_update(state.status_code, hint.code, hint.message))
+    return updates
 
 
 def node_poc_from_refs(state: CVEState) -> dict:
@@ -170,7 +199,14 @@ def node_poc_from_refs(state: CVEState) -> dict:
                 "phases_tried": state.phases_tried + ["poc_from_refs"],
             }
     except Exception as e:
+        hint = classify_error(e, source="llm")
         console.print(f"  [red]✗ AI 生成失败:[/] {e}")
+        return {
+            "error_messages": state.error_messages + [f"AI 生成 PoC 失败: {e}"],
+            **make_status_update(state.status_code, hint.code, hint.message),
+            "current_phase": "nuclei_search",
+            "phases_tried": state.phases_tried + ["poc_from_refs"],
+        }
 
     return {"current_phase": "nuclei_search", "phases_tried": state.phases_tried + ["poc_from_refs"]}
 
@@ -188,9 +224,24 @@ def node_nuclei_search(state: CVEState) -> dict:
                 "current_phase": "verify_poc",
                 "phases_tried": state.phases_tried + ["nuclei_search"],
             }
+        if result.get("error"):
+            hint = classify_error(result.get("error"), source="nuclei")
+            return {
+                "error_messages": state.error_messages + [f"nuclei 搜索失败: {result.get('error')}"],
+                **make_status_update(state.status_code, hint.code, hint.message),
+                "current_phase": "exploitdb_search",
+                "phases_tried": state.phases_tried + ["nuclei_search"],
+            }
         console.print("  [yellow]⚠ nuclei 库中未找到[/]")
     except Exception as e:
+        hint = classify_error(e, source="nuclei")
         console.print(f"  [red]✗ 搜索失败:[/] {e}")
+        return {
+            "error_messages": state.error_messages + [f"nuclei 搜索失败: {e}"],
+            **make_status_update(state.status_code, hint.code, hint.message),
+            "current_phase": "exploitdb_search",
+            "phases_tried": state.phases_tried + ["nuclei_search"],
+        }
 
     return {"current_phase": "exploitdb_search", "phases_tried": state.phases_tried + ["nuclei_search"]}
 
@@ -204,6 +255,7 @@ def node_exploitdb_search(state: CVEState) -> dict:
             records = result.get("results", [])
             console.print(f"  [green]✓[/] 找到 {len(records)} 个 exploit")
             # 提取 exploit 内容
+            extract_errors = []
             for rec in records[:2]:
                 content = extract_url_content(rec["url"])
                 if content.get("content"):
@@ -216,9 +268,34 @@ def node_exploitdb_search(state: CVEState) -> dict:
                             "current_phase": "verify_poc",
                             "phases_tried": state.phases_tried + ["exploitdb_search"],
                         }
+                elif content.get("error"):
+                    extract_errors.append(f"{rec['url']}: {content.get('error')}")
+            if extract_errors:
+                hint = classify_error(extract_errors[0], source="reference")
+                return {
+                    "error_messages": state.error_messages + extract_errors[:2],
+                    **make_status_update(state.status_code, hint.code, hint.message),
+                    "current_phase": "imfht_search",
+                    "phases_tried": state.phases_tried + ["exploitdb_search"],
+                }
+        if result.get("error"):
+            hint = classify_error(result.get("error"), source="exploit-db")
+            return {
+                "error_messages": state.error_messages + [f"Exploit-DB 搜索失败: {result.get('error')}"],
+                **make_status_update(state.status_code, hint.code, hint.message),
+                "current_phase": "imfht_search",
+                "phases_tried": state.phases_tried + ["exploitdb_search"],
+            }
         console.print("  [yellow]⚠ Exploit-DB 中未找到可用 PoC[/]")
     except Exception as e:
+        hint = classify_error(e, source="exploit-db")
         console.print(f"  [red]✗ 搜索失败:[/] {e}")
+        return {
+            "error_messages": state.error_messages + [f"Exploit-DB 搜索失败: {e}"],
+            **make_status_update(state.status_code, hint.code, hint.message),
+            "current_phase": "imfht_search",
+            "phases_tried": state.phases_tried + ["exploitdb_search"],
+        }
 
     return {"current_phase": "imfht_search", "phases_tried": state.phases_tried + ["exploitdb_search"]}
 
@@ -239,9 +316,24 @@ def node_imfht_search(state: CVEState) -> dict:
                     "current_phase": "verify_poc",
                     "phases_tried": state.phases_tried + ["imfht_search"],
                 }
+        if result.get("error"):
+            hint = classify_error(result.get("error"), source="imfht")
+            return {
+                "error_messages": state.error_messages + [f"imfht 搜索失败: {result.get('error')}"],
+                **make_status_update(state.status_code, hint.code, hint.message),
+                "current_phase": "web_search",
+                "phases_tried": state.phases_tried + ["imfht_search"],
+            }
         console.print("  [yellow]⚠ imfht 中未找到可用 PoC[/]")
     except Exception as e:
+        hint = classify_error(e, source="imfht")
         console.print(f"  [red]✗ 搜索失败:[/] {e}")
+        return {
+            "error_messages": state.error_messages + [f"imfht 搜索失败: {e}"],
+            **make_status_update(state.status_code, hint.code, hint.message),
+            "current_phase": "web_search",
+            "phases_tried": state.phases_tried + ["imfht_search"],
+        }
 
     return {"current_phase": "web_search", "phases_tried": state.phases_tried + ["imfht_search"]}
 
@@ -256,25 +348,57 @@ def node_web_search(state: CVEState) -> dict:
     ]
 
     all_results = []
+    search_errors = []
     for q in queries:
         results = search_web(q, max_results=5)
+        for item in results:
+            if item.get("title") == "搜索错误":
+                search_errors.append(item.get("content", "搜索错误"))
         all_results.extend(results)
 
     if not all_results:
         console.print("  [yellow]⚠ 搜索无结果[/]")
-        return {"current_phase": "generate_report", "phases_tried": state.phases_tried + ["web_search"]}
+        return {
+            **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
+            "current_phase": "generate_report",
+            "phases_tried": state.phases_tried + ["web_search"],
+        }
+
+    if search_errors and len(search_errors) == len(all_results):
+        hint = classify_error(search_errors[0], source="web_search")
+        console.print(f"  [red]✗ 联网搜索失败:[/] {search_errors[0]}")
+        return {
+            "error_messages": state.error_messages + search_errors[:2],
+            **make_status_update(state.status_code, hint.code, hint.message),
+            "current_phase": "generate_report",
+            "phases_tried": state.phases_tried + ["web_search"],
+        }
 
     console.print(f"  搜索到 {len(all_results)} 条结果")
 
     # 提取高价值页面内容
     search_text = ""
+    extract_errors = []
     for r in all_results[:5]:
+        if r.get("title") == "搜索错误":
+            continue
         if r.get("content"):
             search_text += f"\n### {r['title']} ({r['url']})\n{r['content'][:2000]}\n"
         elif r.get("url"):
             page = extract_url_content(r["url"])
             if page.get("content"):
                 search_text += f"\n### {page['title']} ({r['url']})\n{page['content'][:2000]}\n"
+            elif page.get("error"):
+                extract_errors.append(f"{r['url']}: {page.get('error')}")
+
+    if not search_text and extract_errors:
+        hint = classify_error(extract_errors[0], source="reference")
+        return {
+            "error_messages": state.error_messages + extract_errors[:3],
+            **make_status_update(state.status_code, hint.code, hint.message),
+            "current_phase": "generate_report",
+            "phases_tried": state.phases_tried + ["web_search"],
+        }
 
     prompt = POC_GENERATION_FROM_SEARCH.format(
         cve_id=state.cve_id,
@@ -299,9 +423,20 @@ def node_web_search(state: CVEState) -> dict:
                 "phases_tried": state.phases_tried + ["web_search"],
             }
     except Exception as e:
+        hint = classify_error(e, source="llm")
         console.print(f"  [red]✗ AI 生成失败:[/] {e}")
+        return {
+            "error_messages": state.error_messages + [f"AI 基于搜索结果生成 PoC 失败: {e}"],
+            **make_status_update(state.status_code, hint.code, hint.message),
+            "current_phase": "generate_report",
+            "phases_tried": state.phases_tried + ["web_search"],
+        }
 
-    return {"current_phase": "generate_report", "phases_tried": state.phases_tried + ["web_search"]}
+    return {
+        **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
+        "current_phase": "generate_report",
+        "phases_tried": state.phases_tried + ["web_search"],
+    }
 
 
 def node_verify_poc(state: CVEState) -> dict:
@@ -322,32 +457,58 @@ def node_verify_poc(state: CVEState) -> dict:
         console.print(f"  发送 HTTP 请求到 {target}...")
         result = send_poc_and_capture(raw_http=raw)
     else:
-        return {"current_phase": _next_phase_after_verify(state)}
+        return {
+            **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
+            "current_phase": _next_phase_after_verify(state),
+        }
 
     success = result.get("success", False)
     ips_matches = result.get("ips_matches", [])
-    ips_matched = len(ips_matches) > 0
+    ips_classification = classify_ips_matches(ips_matches, state.cve_id)
+    ips_summary = summarize_ips_classification(ips_classification)
+    ips_matched = ips_classification["ips_matched"]
+    generic_ips_matched = ips_classification["generic_ips_matched"]
 
     updates = {
         "http_status_code": result.get("status_code", 0),
         "http_response_body": result.get("body", "")[:2000],
         "pcap_file_path": result.get("pcap_file_path", ""),
         "ips_matched": ips_matched,
-        "ips_match_details": ips_matches,
+        "generic_ips_matched": generic_ips_matched,
+        "ips_match_details": ips_classification["all_matches"],
+        "cve_ips_match_details": ips_classification["cve_matches"],
+        "generic_ips_match_details": ips_classification["generic_matches"],
+        "ips_match_summary": ips_summary,
     }
 
     if ips_matched:
-        console.print(f"  [bold green]✓ IPS 命中![/] {len(ips_matches)} 条匹配")
+        console.print(
+            f"  [bold green]✓ 当前 CVE IPS 命中![/] "
+            f"{ips_summary['cve_match_count']}/{ips_summary['total_count']} 条匹配"
+        )
         updates["status"] = "SUCCESS"
-        updates["status_code"] = "CAPTURE_SUCCESS"
-        updates["message"] = "PoC 验证成功，IPS 命中"
+        updates["status_code"] = CAPTURE_SUCCESS
+        updates["message"] = "PoC 验证成功，IPS CVE 字段匹配当前 CVE"
         updates["current_phase"] = "archive"
+    elif generic_ips_matched:
+        console.print(
+            f"  [yellow]IPS 有通用/非当前 CVE 命中[/] "
+            f"{ips_summary['generic_match_count']} 条，但 CVE 字段未匹配 {state.cve_id}，不计为成功"
+        )
+        updates["message"] = "检测到通用 IPS 命中，但未匹配当前 CVE，不作为成功验证依据"
+        updates.update(make_status_update(state.status_code, IPS_GENERIC_MATCH_ONLY, status_description(IPS_GENERIC_MATCH_ONLY)))
+        if not success and result.get("error"):
+            updates["error_messages"] = state.error_messages + [result.get("error", "")]
+        updates["current_phase"] = _next_phase_after_verify(state)
     elif success:
-        console.print(f"  [yellow]请求成功但 IPS 未命中[/] (HTTP {result.get('status_code', '?')})")
+        console.print(f"  [yellow]请求成功但当前 CVE IPS 未命中[/] (HTTP {result.get('status_code', '?')})")
         updates["current_phase"] = _next_phase_after_verify(state)
     else:
+        verify_source = "http2pcap" if cfg.http2pcap_url else "target"
+        hint = classify_error(result.get("error", "未知错误"), source=verify_source, error_type=result.get("error_type", ""))
         console.print(f"  [red]✗ 请求失败:[/] {result.get('error', '未知错误')}")
         updates["error_messages"] = state.error_messages + [result.get("error", "")]
+        updates.update(make_status_update(state.status_code, hint.code, hint.message))
         updates["current_phase"] = _next_phase_after_verify(state)
 
     return updates
@@ -355,7 +516,7 @@ def node_verify_poc(state: CVEState) -> dict:
 
 def node_archive(state: CVEState) -> dict:
     """IPS 命中成功后的快速归档，直接进入报告生成。"""
-    console.print("[bold cyan]▶ IPS 命中，进入归档[/]")
+    console.print("[bold cyan]▶ 当前 CVE IPS 命中，进入归档[/]")
     return {"current_phase": "generate_report"}
 
 
@@ -366,14 +527,20 @@ def node_generate_report(state: CVEState) -> dict:
     if state.status != "SUCCESS":
         final_status = "FAILURE"
         if not state.is_http_vuln:
-            final_code = "NOT_HTTP_VULN"
+            final_code = NOT_HTTP_VULN
             final_msg = "漏洞非 HTTP 类型，工作流不支持"
-        elif state.status_code == "PARAMETER_ERROR":
-            final_code = "PARAMETER_ERROR"
+        elif state.status_code == PARAMETER_ERROR:
+            final_code = PARAMETER_ERROR
             final_msg = state.message
+        elif state.generic_ips_matched:
+            final_code = IPS_GENERIC_MATCH_ONLY
+            final_msg = "检测到通用 IPS 命中，但日志 CVE 字段未匹配当前 CVE"
+        elif state.status_code:
+            final_code = state.status_code
+            final_msg = state.message or status_description(final_code)
         else:
-            final_code = "AI_REPRODUCTION_FAILED"
-            final_msg = "所有 PoC 源均已尝试，未能命中 IPS"
+            final_code = AI_REPRODUCTION_FAILED
+            final_msg = status_description(AI_REPRODUCTION_FAILED)
     else:
         final_status = state.status
         final_code = state.status_code
@@ -393,6 +560,8 @@ def node_generate_report(state: CVEState) -> dict:
         error_messages="; ".join(state.error_messages[-3:]) or "无",
         http_status_code=state.http_status_code or "无",
         ips_matched=state.ips_matched,
+        generic_ips_matched=state.generic_ips_matched,
+        ips_match_summary=json.dumps(state.ips_match_summary, ensure_ascii=False) if state.ips_match_summary else "无",
         pcap_file_path=state.pcap_file_path or "无",
     )
 
@@ -421,6 +590,11 @@ def node_generate_report(state: CVEState) -> dict:
         "poc_raw_http": state.poc_raw_http,
         "phases_tried": state.phases_tried,
         "ips_matched": state.ips_matched,
+        "generic_ips_matched": state.generic_ips_matched,
+        "ips_match_summary": state.ips_match_summary,
+        "ips_match_details": state.ips_match_details,
+        "cve_ips_match_details": state.cve_ips_match_details,
+        "generic_ips_match_details": state.generic_ips_match_details,
         "pcap_file_path": state.pcap_file_path,
         "timestamp": datetime.now().isoformat(),
     }
@@ -493,7 +667,7 @@ def _next_phase_after_verify(state: CVEState) -> str:
 
 
 def route_after_validate(state: CVEState) -> str:
-    if state.status == "FAILURE" and state.status_code == "PARAMETER_ERROR":
+    if state.status == "FAILURE" and state.status_code == PARAMETER_ERROR:
         return "generate_report"
     return "query_nvd"
 
