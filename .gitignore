@@ -12,3 +12,6 @@ build/
 *.pdf
 *.zip
 工具资料/
+
+# NVD 本地数据包（大文件，可通过 --update-nvd 重新下载）
+poc_kb/nvd/
