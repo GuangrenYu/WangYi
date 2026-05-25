@@ -1,9 +1,9 @@
-"""NVD API 查询模块（本地优先 + API 回退）。"""
+"""NVD API 查询模块。"""
 
 from __future__ import annotations
 
-import sys
 import time
+import sys
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 
@@ -91,31 +91,10 @@ def _print_rate_limit_retry(cve_id: str, delay: int, attempt: int) -> None:
 
 
 def query_nvd(cve_id: str) -> dict:
-    """查询 NVD 获取 CVE 详细信息（优先本地数据，回退 API）。
+    """查询 NVD 获取 CVE 详细信息。
 
     返回包含 description, references, affected_products, cvss 等字段的字典。
     """
-    # ── 优先从本地 NVD 数据查询 ──
-    try:
-        from cve_hunter.tools.nvd_local import query_nvd_local
-
-        local_result = query_nvd_local(cve_id)
-        if local_result is not None:
-            _print_local_hit(cve_id)
-            return local_result
-    except Exception:
-        pass
-
-    # ── 回退到远程 NVD API ──
-    return _query_nvd_api(cve_id)
-
-
-def _print_local_hit(cve_id: str) -> None:
-    output = sys.__stdout__ or sys.stdout
-    print(f"NVD 本地命中: {cve_id}", file=output, flush=True)
-
-
-def _query_nvd_api(cve_id: str) -> dict:
     headers = {"User-Agent": "CVEHunter/1.0"}
     if cfg.nvd_api_key:
         headers["apiKey"] = cfg.nvd_api_key

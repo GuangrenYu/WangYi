@@ -1,3 +1,0 @@
-[submodule "poc_kb/trickest-cve"]
-	path = poc_kb/trickest-cve
-	url = https://github.com/trickest/cve.git

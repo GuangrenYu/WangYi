@@ -10,8 +10,6 @@
     python main.py --stats
     python main.py --retry-http-failed
     python main.py --retry-mode status --status-code AI_REPRODUCTION_FAILED
-    python main.py --update-nvd
-    python main.py --update-nvd --update-nvd-years 2024,2025
     python main.py                 # 交互模式
 """
 
@@ -1123,59 +1121,6 @@ def run_batch_stats() -> None:
         console.print(skipped)
 
 
-def run_update_nvd(
-    years: list[int] | None = None,
-    force: bool = False,
-) -> None:
-    """下载/更新本地 NVD 数据 Feed。
-
-    Args:
-        years: 要下载的年份列表，None 表示全部
-        force: 强制重新下载
-    """
-    from cve_hunter.tools.nvd_local import download_nvd_feeds, get_nvd_local_status
-
-    console.print("[bold cyan]NVD 本地数据更新[/bold cyan]")
-
-    status_before = get_nvd_local_status()
-    if status_before["exists"]:
-        console.print(f"  本地目录: {status_before['dir']}")
-        console.print(f"  已有年份: {status_before['years_available']}")
-        console.print(f"  总大小: {status_before['total_size_mb']} MB")
-    else:
-        console.print("  本地数据目录不存在，将首次下载")
-
-    console.print()
-
-    def progress(year: str, status: str, msg: str):
-        label = f"[{year}]"
-        if status == "skip":
-            console.print(f"  [dim]{label} 跳过（已是最新）[/dim]")
-        elif status == "download":
-            console.print(f"  [yellow]{label} 下载中... {msg}[/yellow]")
-        elif status == "done":
-            console.print(f"  [green]{label} 完成 ({msg})[/green]")
-        elif status == "error":
-            console.print(f"  [red]{label} 失败: {msg}[/red]")
-
-    result = download_nvd_feeds(years=years, force=force, progress_callback=progress)
-
-    console.print()
-    table = Table(title="下载结果")
-    table.add_column("类别", style="cyan")
-    table.add_column("数量", justify="right")
-    if result["downloaded"]:
-        table.add_row("[green]新下载[/green]", str(len(result["downloaded"])))
-    if result["skipped"]:
-        table.add_row("[dim]跳过（已最新）[/dim]", str(len(result["skipped"])))
-    if result["errors"]:
-        table.add_row("[red]失败[/red]", str(len(result["errors"])))
-    console.print(table)
-
-    status_after = get_nvd_local_status()
-    console.print(f"[bold green]本地数据就绪:[/bold green] {status_after['years_available']} 个年份, {status_after['total_size_mb']} MB")
-
-
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CVE Hunter 漏洞复现工具")
     parser.add_argument("cve_id", nargs="?", help="单个 CVE 编号；批量/分类模式下也可作为测试文件名")
@@ -1190,9 +1135,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--start", type=int, help="批量测试起始序号，1-based，包含")
     parser.add_argument("--end", type=int, help="批量测试结束序号，1-based，包含")
     parser.add_argument("--terminals", "-t", type=int, help="批量测试/二次核验时自动拆分启动的终端数")
-    parser.add_argument("--update-nvd", action="store_true", help="下载/更新本地 NVD 数据 Feed（2002-至今）")
-    parser.add_argument("--update-nvd-years", help="指定要下载的年份，逗号分隔，如 2024,2025")
-    parser.add_argument("--update-nvd-force", action="store_true", help="强制重新下载 NVD 数据（忽略本地已有文件）")
     parser.add_argument("--retry-shard", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--retry-shards", type=int, help=argparse.SUPPRESS)
     return parser.parse_args(argv)
@@ -1200,7 +1142,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def interactive_loop() -> None:
     console.print("[bold cyan]CVE Hunter[/bold cyan] - 基于 LangGraph 的漏洞自动复现")
-    console.print("输入 CVE 编号开始复现；输入 batch 进入批量测试；输入 retry 二次核验失败记录；输入 retry-passed 核验历史通过记录；输入 retry-status 按状态码核验；输入 classify 进入分类筛选；输入 stats 查看批量统计；输入 update-nvd 更新本地NVD数据；输入 quit 退出\n")
+    console.print("输入 CVE 编号开始复现；输入 batch 进入批量测试；输入 retry 二次核验失败记录；输入 retry-passed 核验历史通过记录；输入 retry-status 按状态码核验；输入 classify 进入分类筛选；输入 stats 查看批量统计；输入 quit 退出\n")
     while True:
         try:
             cve_id = console.input("[bold green]CVE>[/bold green] ").strip()
@@ -1220,10 +1162,6 @@ def interactive_loop() -> None:
             continue
         if cve_id.lower() in ("stats", "stat", "summary", "s"):
             run_batch_stats()
-            console.print()
-            continue
-        if cve_id.lower() in ("update-nvd", "update-nvd", "nvd-update"):
-            run_update_nvd()
             console.print()
             continue
         if cve_id.lower() in ("retry", "retry-http", "retry-http-failed", "r"):
@@ -1272,13 +1210,6 @@ def main():
 
     if (args.retry_shard is not None or args.retry_shards is not None) and not args.retry_http_failed:
         raise SystemExit("--retry-shard/--retry-shards 只能和 --retry-http-failed 一起使用")
-
-    if args.update_nvd:
-        nvd_years = None
-        if args.update_nvd_years:
-            nvd_years = [int(y.strip()) for y in args.update_nvd_years.split(",") if y.strip().isdigit()]
-        run_update_nvd(years=nvd_years, force=args.update_nvd_force)
-        return
 
     selected_modes = sum(1 for enabled in (args.batch, args.classify, args.stats, args.retry_http_failed) if enabled)
     if selected_modes > 1:
