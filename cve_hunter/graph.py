@@ -1,7 +1,16 @@
 """LangGraph 工作流核心编排。
 
 实现 CVE HTTP 漏洞复现的完整工作流：
-  输入CVE → 获取NVD信息 → 适用性判断 → 多源PoC搜索(带回退) → 验证 → 归档
+  输入CVE → 获取NVD信息 → 适用性判断 → 本地KB搜索(优先) → 多源PoC搜索(带回退) → 验证 → 归档 → 保存到本地KB
+
+PoC 获取优先级（由高到低）：
+  1. 本地知识库 custom/（自验证保存的 PoC）
+  2. 本地知识库 trickest-cve/（外部 PoC 目录，含 GitHub 仓库链接）
+  3. NVD References + AI 生成
+  4. Nuclei 官方模板库
+  5. Exploit-DB
+  6. imfht 漏洞库
+  7. 联网搜索 + AI 生成
 """
 
 from __future__ import annotations
@@ -27,6 +36,7 @@ from cve_hunter.prompts.templates import (
 from cve_hunter.tools.nvd import query_nvd
 from cve_hunter.tools.web_extract import extract_url_content
 from cve_hunter.tools.poc_sources import search_nuclei, search_exploitdb, search_imfht
+from cve_hunter.tools.local_kb import search_local_kb, save_to_local_kb
 from cve_hunter.tools.web_search import search_web
 from cve_hunter.tools.http_sender import send_poc_and_capture
 from cve_hunter.ips_match import classify_ips_matches, summarize_ips_classification
@@ -130,6 +140,55 @@ def node_vuln_type_check(state: CVEState) -> dict:
     return {
         "is_http_vuln": result.is_http_vuln,
         "vuln_type": result.vuln_type,
+        "current_phase": "local_kb_search",
+    }
+
+
+def node_local_kb_search(state: CVEState) -> dict:
+    """在本地知识库中搜索 PoC（最高优先级，优先于远程源）。"""
+    console.print("[bold cyan]▶ 搜索本地知识库[/]")
+    try:
+        result = search_local_kb(state.cve_id)
+        if result.get("found"):
+            source_label = result["source"]
+            console.print(f"  [green]✓ 本地知识库命中[/] (来源: {source_label})")
+
+            updates: dict = {
+                "phases_tried": state.phases_tried + ["local_kb_search"],
+            }
+
+            if result.get("raw_http"):
+                console.print("  [green]✓ 提取到 HTTP PoC[/]")
+                updates.update({
+                    "poc_raw_http": result["raw_http"],
+                    "poc_payloads": [result["raw_http"]],
+                    "poc_source": source_label,
+                    "current_phase": "verify_poc",
+                })
+                return updates
+
+            if result.get("yaml_content"):
+                updates.update({
+                    "poc_nuclei_yaml": result["yaml_content"],
+                    "poc_source": source_label,
+                    "current_phase": "verify_poc",
+                })
+                return updates
+
+            # trickest-cve 命中但未提取到 HTTP PoC，保留 github_repos 供参考
+            console.print("  [yellow]⚠ 本地 KB 无可用 HTTP PoC，继续远程搜索[/]")
+            updates["current_phase"] = "reference_analysis"
+            return updates
+
+        if result.get("error"):
+            console.print(f"  [yellow]⚠ {result.get('error')}[/]")
+
+        console.print("  [dim]本地知识库未命中[/]")
+    except Exception as e:
+        console.print(f"  [yellow]⚠ 本地知识库搜索异常: {e}[/]")
+
+    return {
+        "phases_tried": state.phases_tried + ["local_kb_search"],
         "current_phase": "reference_analysis",
     }
 
@@ -515,8 +574,39 @@ def node_verify_poc(state: CVEState) -> dict:
 
 
 def node_archive(state: CVEState) -> dict:
-    """IPS 命中成功后的快速归档，直接进入报告生成。"""
+    """IPS 命中成功后的快速归档。"""
     console.print("[bold cyan]▶ 当前 CVE IPS 命中，进入归档[/]")
+    return {"current_phase": "save_to_local_kb"}
+
+
+def node_save_to_local_kb(state: CVEState) -> dict:
+    """验证成功后将 PoC 保存到本地知识库 custom/ 目录。"""
+    console.print("[bold cyan]▶ 保存 PoC 到本地知识库[/]")
+
+    if state.poc_raw_http or state.poc_nuclei_yaml:
+        metadata = {
+            "status": state.status,
+            "poc_source": state.poc_source,
+            "cvss_score": state.cvss_score,
+            "cvss_severity": state.cvss_severity,
+            "vuln_type": state.vuln_type,
+            "nvd_description": state.nvd_description,
+            "references": state.nvd_references,
+            "timestamp": datetime.now().isoformat(),
+        }
+        path = save_to_local_kb(
+            state.cve_id,
+            poc_raw_http=state.poc_raw_http,
+            poc_nuclei_yaml=state.poc_nuclei_yaml,
+            metadata=metadata,
+        )
+        if path:
+            console.print(f"  [green]✓[/] 已保存到 {path}")
+        else:
+            console.print("  [yellow]⚠ 保存失败[/]")
+    else:
+        console.print("  [dim]无 PoC 可保存[/]")
+
     return {"current_phase": "generate_report"}
 
 
@@ -649,8 +739,8 @@ def _extract_http_requests(text: str, cve_id: str) -> list[str]:
 def _next_phase_after_verify(state: CVEState) -> str:
     """验证失败后确定下一个阶段。"""
     phase_order = [
-        "poc_from_refs", "nuclei_search", "exploitdb_search",
-        "imfht_search", "web_search",
+        "local_kb_search", "poc_from_refs", "nuclei_search",
+        "exploitdb_search", "imfht_search", "web_search",
     ]
 
     tried = set(state.phases_tried)
@@ -675,6 +765,13 @@ def route_after_validate(state: CVEState) -> str:
 def route_after_type_check(state: CVEState) -> str:
     if not state.is_http_vuln:
         return "generate_report"
+    return "local_kb_search"
+
+
+def route_after_local_kb(state: CVEState) -> str:
+    """本地 KB 搜索后路由：找到 PoC 则直接验证，否则继续常规流程。"""
+    if state.current_phase == "verify_poc":
+        return "verify_poc"
     return "reference_analysis"
 
 
@@ -684,6 +781,7 @@ def route_after_phase(state: CVEState) -> str:
     phase_map = {
         "nvd_query": "query_nvd",
         "vuln_type_check": "vuln_type_check",
+        "local_kb_search": "local_kb_search",
         "reference_analysis": "reference_analysis",
         "poc_from_refs": "poc_from_refs",
         "nuclei_search": "nuclei_search",
@@ -692,6 +790,7 @@ def route_after_phase(state: CVEState) -> str:
         "web_search": "web_search",
         "verify_poc": "verify_poc",
         "archive": "archive",
+        "save_to_local_kb": "save_to_local_kb",
         "generate_report": "generate_report",
         "done": END,
     }
@@ -712,6 +811,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("validate_input", node_validate_input)
     workflow.add_node("query_nvd", node_query_nvd)
     workflow.add_node("vuln_type_check", node_vuln_type_check)
+    workflow.add_node("local_kb_search", node_local_kb_search)
     workflow.add_node("reference_analysis", node_reference_analysis)
     workflow.add_node("poc_from_refs", node_poc_from_refs)
     workflow.add_node("nuclei_search", node_nuclei_search)
@@ -720,6 +820,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("web_search", node_web_search)
     workflow.add_node("verify_poc", node_verify_poc)
     workflow.add_node("archive", node_archive)
+    workflow.add_node("save_to_local_kb", node_save_to_local_kb)
     workflow.add_node("generate_report", node_generate_report)
 
     # 设置入口
@@ -729,11 +830,13 @@ def build_graph() -> StateGraph:
     workflow.add_conditional_edges("validate_input", route_after_validate)
     workflow.add_edge("query_nvd", "vuln_type_check")
     workflow.add_conditional_edges("vuln_type_check", route_after_type_check)
+    workflow.add_conditional_edges("local_kb_search", route_after_local_kb)
     workflow.add_edge("reference_analysis", "poc_from_refs")
 
     # PoC 搜索链和验证的路由
     for node in ["poc_from_refs", "nuclei_search", "exploitdb_search",
-                  "imfht_search", "web_search", "verify_poc", "archive"]:
+                  "imfht_search", "web_search", "verify_poc", "archive",
+                  "save_to_local_kb"]:
         workflow.add_conditional_edges(node, route_after_phase)
 
     workflow.add_edge("generate_report", END)

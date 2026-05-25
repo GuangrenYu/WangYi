@@ -38,6 +38,12 @@ class Config:
     # wayback-cve 外部服务地址（可选，不配置则使用 httpx + trafilatura）
     wayback_url: str = field(default_factory=lambda: os.getenv("WAYBACK_URL", ""))
 
+    # 本地 PoC 知识库目录
+    poc_kb_dir: str = field(default_factory=lambda: os.getenv("POC_KB_DIR", "poc_kb"))
+
+    # 本地 NVD 数据库目录
+    nvd_local_dir: str = field(default_factory=lambda: os.getenv("NVD_LOCAL_DIR", "poc_kb/nvd"))
+
     # 输出目录
     output_dir: str = field(default_factory=lambda: os.getenv("OUTPUT_DIR", "output"))
 
