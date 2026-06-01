@@ -655,17 +655,21 @@ def node_generate_report(state: CVEState) -> dict:
         pcap_file_path=state.pcap_file_path or "无",
     )
 
-    try:
-        report = invoke_llm(prompt)
-    except Exception as e:
-        report = f"# {state.cve_id} 复现报告\n\n生成报告失败: {e}\n\n状态: {final_status}"
+    if state.generate_report:
+        try:
+            report = invoke_llm(prompt)
+        except Exception as e:
+            report = f"# {state.cve_id} 复现报告\n\n生成报告失败: {e}\n\n状态: {final_status}"
+    else:
+        report = ""
 
     # 归档所有产物
     output_dir = Path(cfg.output_dir) / state.cve_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    with open(output_dir / "report.md", "w", encoding="utf-8") as f:
-        f.write(report)
+    if report:
+        with open(output_dir / "report.md", "w", encoding="utf-8") as f:
+            f.write(report)
 
     report_data = {
         "cve_id": state.cve_id,

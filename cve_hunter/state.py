@@ -52,3 +52,4 @@ class CVEState:
     status_code: str = ""
     message: str = ""
     analysis_report: str = ""
+    generate_report: bool = True  # 是否生成 LLM 分析报告（单CVE默认开启，批量默认关闭）

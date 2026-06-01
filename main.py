@@ -6,6 +6,7 @@
     python main.py --batch
     python main.py --batch --file fhq-http.txt --start 1 --end 20
     python main.py --batch --file fhq-http.txt --start 1 --end 100 --terminals 5
+    python main.py --continue --file fhq-http.txt --terminals 5
     python main.py --classify --file fhq-http.txt
     python main.py --stats
     python main.py --retry-http-failed
@@ -101,7 +102,7 @@ def quiet_workflow_output():
         graph_module.console.quiet = old_graph_quiet
 
 
-def run_cve(cve_id: str, *, show_details: bool = True) -> CVEState:
+def run_cve(cve_id: str, *, show_details: bool = True, generate_report: bool = True) -> CVEState:
     """执行一次 CVE 复现流程。"""
     from cve_hunter.graph import build_graph
     from cve_hunter.state import CVEState
@@ -117,7 +118,7 @@ def run_cve(cve_id: str, *, show_details: bool = True) -> CVEState:
         ))
 
     graph = build_graph()
-    initial_state = CVEState(cve_id=cve_id)
+    initial_state = CVEState(cve_id=cve_id, generate_report=generate_report)
 
     final_state = graph.invoke(initial_state)
 
@@ -373,7 +374,7 @@ def launch_vscode_task_group(group_label: str, tasks: list[dict]) -> None:
     console.print("[yellow]如果 VS Code 因安全策略没有自动运行任务，请在新窗口按 Ctrl+Shift+B 运行默认任务。[/yellow]")
 
 
-def launch_batch_terminals(test_file: Path, ranges: list[tuple[int, int]]) -> None:
+def launch_batch_terminals(test_file: Path, ranges: list[tuple[int, int]], *, generate_report: bool = False) -> None:
     """按范围在 VS Code 集成终端执行批量测试。"""
     script = str(Path(__file__).resolve())
     tasks: list[dict] = []
@@ -390,17 +391,19 @@ def launch_batch_terminals(test_file: Path, ranges: list[tuple[int, int]]) -> No
             "--end",
             str(chunk_end),
         ]
+        if generate_report:
+            command_args.append("--report")
         tasks.append(make_vscode_task(label, command_args))
         console.print(f"[green]已准备 VS Code 终端任务 {i}/{len(ranges)}:[/green] {chunk_start}-{chunk_end}")
     launch_vscode_task_group(f"CVE Hunter: Batch All ({len(ranges)} terminals)", tasks)
 
 
-def execute_cve_as_batch_result(index: int, cve_id: str) -> BatchResult:
+def execute_cve_as_batch_result(index: int, cve_id: str, *, generate_report: bool = False) -> BatchResult:
     """按批量结果格式执行并封装一次 CVE 复现。"""
     case_started = perf_counter()
     try:
         with quiet_workflow_output():
-            final_state = run_cve(cve_id, show_details=False)
+            final_state = run_cve(cve_id, show_details=False, generate_report=generate_report)
         ips_summary = final_state.get("ips_match_summary", {}) or {}
         ips_matched = bool(final_state.get("ips_matched", False))
         generic_ips_matched = bool(final_state.get("generic_ips_matched", False))
@@ -449,6 +452,8 @@ def run_batch(
     start: int | None = None,
     end: int | None = None,
     terminal_count: int | None = None,
+    *,
+    generate_report: bool = False,
 ) -> list[BatchResult]:
     """按测试文件中的 CVE 编号批量执行复现流程。"""
     should_prompt_terminals = terminal_count is None and (file_name is None or start is None or end is None)
@@ -468,7 +473,7 @@ def run_batch(
             title="批量测试多终端启动",
             border_style="cyan",
         ))
-        launch_batch_terminals(test_file, ranges)
+        launch_batch_terminals(test_file, ranges, generate_report=generate_report)
         return []
 
     console.print(Panel(
@@ -488,7 +493,7 @@ def run_batch(
 
     for offset, cve_id in enumerate(selected, start=1):
         absolute_index = start_index + offset - 1
-        result = execute_cve_as_batch_result(absolute_index, cve_id)
+        result = execute_cve_as_batch_result(absolute_index, cve_id, generate_report=generate_report)
         if result.passed:
             passed_count += 1
 
@@ -510,6 +515,52 @@ def run_batch(
     print_batch_summary(results, total_elapsed)
     console.print(f"[green]批量测试明细已保存:[/green] {output_path}")
     return results
+
+
+def run_continue(
+    file_name: str | None = None,
+    terminal_count: int | None = None,
+    *,
+    generate_report: bool = False,
+) -> list[BatchResult]:
+    """继续测试：从原列表减去 output/batch 中已完成的 CVE，批量执行剩余。"""
+    test_file = resolve_test_file(file_name)
+    cve_ids = load_cve_ids(test_file)
+    completed_indices = collect_completed_indices(test_file)
+
+    remaining = [(i, cve_id) for i, cve_id in enumerate(cve_ids, start=1) if i not in completed_indices]
+
+    if not remaining:
+        console.print("[green]所有 CVE 已完成测试，无需继续。[/green]")
+        return []
+
+    total_remaining = len(remaining)
+    selected_terminals = choose_terminal_count(total_remaining, terminal_count, prompt=terminal_count is None)
+
+    # 将剩余 CVE 写入临时文件供 run_batch 使用
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    BATCH_DIR.mkdir(parents=True, exist_ok=True)
+    continue_file = BATCH_DIR / f"{test_file.stem}_continue_{timestamp}.txt"
+    continue_file.write_text("\n".join(cve_id for _, cve_id in remaining) + "\n", encoding="utf-8")
+
+    console.print(Panel(
+        f"原文件: [bold yellow]{test_file}[/bold yellow]\n"
+        f"总 CVE 数: {len(cve_ids)}\n"
+        f"已完成: [dim]{len(completed_indices)}[/dim]\n"
+        f"剩余: [bold green]{total_remaining}[/bold green]\n"
+        f"终端数: {selected_terminals}\n"
+        f"继续文件: {continue_file}",
+        title="继续测试",
+        border_style="cyan",
+    ))
+
+    return run_batch(
+        str(continue_file),
+        start=1,
+        end=total_remaining,
+        terminal_count=selected_terminals,
+        generate_report=generate_report,
+    )
 
 
 def run_classify(file_name: str | None = None, start: int | None = None, end: int | None = None) -> list[ClassifyResult]:
@@ -615,6 +666,35 @@ def print_classify_summary(
     console.print(table)
     console.print(f"[green]HTTP 结果:[/green] {http_path}")
     console.print(f"[green]非 HTTP 结果:[/green] {non_http_path}")
+
+
+def collect_completed_indices(test_file: Path) -> set[int]:
+    """扫描 output/batch 目录，收集指定测试文件已完成的所有 CVE 序号。"""
+    if not BATCH_DIR.exists():
+        return set()
+
+    completed: set[int] = set()
+    for path in BATCH_DIR.glob("*.json"):
+        try:
+            data = load_batch_record(path)
+            json_test_file = data.get("test_file", "")
+            # 匹配完整路径或仅文件名
+            if json_test_file != str(test_file) and Path(json_test_file).name != test_file.name:
+                continue
+            results = data.get("results", [])
+            if not isinstance(results, list):
+                continue
+            for result in results:
+                try:
+                    idx = int(result.get("index"))
+                    if idx > 0:
+                        completed.add(idx)
+                except (TypeError, ValueError):
+                    pass
+        except Exception:
+            pass
+
+    return completed
 
 
 def create_batch_results_path(test_file: Path, start: int, end: int) -> Path:
@@ -875,6 +955,8 @@ def launch_retry_terminals(
     terminal_count: int,
     retry_mode: str,
     retry_status_codes: set[str] | None = None,
+    *,
+    generate_report: bool = False,
 ) -> None:
     """在 VS Code 集成终端执行二次核验，按目标列表分片避免重复处理。"""
     script = str(Path(__file__).resolve())
@@ -898,6 +980,8 @@ def launch_retry_terminals(
         ]
         if retry_mode == "status":
             command_args.extend(["--status-code", ",".join(sorted(retry_status_codes or []))])
+        if generate_report:
+            command_args.append("--report")
         tasks.append(make_vscode_task(label, command_args))
         console.print(f"[green]已准备二次核验 VS Code 终端任务 {shard + 1}/{terminal_count}[/green]")
     launch_vscode_task_group(f"CVE Hunter: Retry All ({terminal_count} terminals)", tasks)
@@ -940,6 +1024,8 @@ def run_retry_http_failed(
     retry_shards: int | None = None,
     retry_mode: str = "failed",
     retry_status_codes: set[str] | None = None,
+    *,
+    generate_report: bool = False,
 ) -> list[BatchResult]:
     """重跑 output/batch 中指定模式的记录并覆盖原结果。"""
     retry_status_codes = set(retry_status_codes or [])
@@ -977,7 +1063,7 @@ def run_retry_http_failed(
                 title="二次核验多终端启动",
                 border_style="cyan",
             ))
-            launch_retry_terminals(start_index, end_index, selected_terminals, retry_mode, retry_status_codes)
+            launch_retry_terminals(start_index, end_index, selected_terminals, retry_mode, retry_status_codes, generate_report=generate_report)
             return []
 
     console.print(Panel(
@@ -994,7 +1080,7 @@ def run_retry_http_failed(
     started = perf_counter()
 
     for offset, target in enumerate(selected, start=1):
-        result = execute_cve_as_batch_result(target.index, target.cve_id)
+        result = execute_cve_as_batch_result(target.index, target.cve_id, generate_report=generate_report)
         write_status = update_retry_result(target, result, retry_mode, retry_status_codes)
         results.append(result)
         if result.passed:
@@ -1180,6 +1266,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CVE Hunter 漏洞复现工具")
     parser.add_argument("cve_id", nargs="?", help="单个 CVE 编号；批量/分类模式下也可作为测试文件名")
     parser.add_argument("--batch", "-b", action="store_true", help="从 test 目录 txt 文件中批量测试 CVE")
+    parser.add_argument("--continue", "--resume", dest="continue_mode", action="store_true", help="继续测试：自动减去 output/batch 中已完成的 CVE，执行剩余")
     parser.add_argument("--classify", action="store_true", help="快速分类 test txt 中的 HTTP/非 HTTP CVE，并输出 *_h.txt/*_f.txt")
     parser.add_argument("--stats", action="store_true", help="统计 output/batch 下已有 JSON 批量测试记录")
     parser.add_argument("--retry-http-failed", "--retry", action="store_true", help="重跑 output/batch 中 HTTP 失败记录并覆盖原结果")
@@ -1195,12 +1282,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--update-nvd-force", action="store_true", help="强制重新下载 NVD 数据（忽略本地已有文件）")
     parser.add_argument("--retry-shard", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--retry-shards", type=int, help=argparse.SUPPRESS)
+    parser.add_argument("--report", action="store_true", help="批量/二次核验模式下生成 LLM 分析报告（单CVE模式默认生成）")
     return parser.parse_args(argv)
 
 
 def interactive_loop() -> None:
     console.print("[bold cyan]CVE Hunter[/bold cyan] - 基于 LangGraph 的漏洞自动复现")
-    console.print("输入 CVE 编号开始复现；输入 batch 进入批量测试；输入 retry 二次核验失败记录；输入 retry-passed 核验历史通过记录；输入 retry-status 按状态码核验；输入 classify 进入分类筛选；输入 stats 查看批量统计；输入 update-nvd 更新本地NVD数据；输入 quit 退出\n")
+    console.print("输入 CVE 编号开始复现；输入 batch 批量测试；输入 continue 继续测试；输入 retry 二次核验失败记录；输入 retry-passed 核验历史通过记录；输入 retry-status 按状态码核验；输入 classify 分类筛选；输入 stats 批量统计；输入 update-nvd 更新本地NVD数据；输入 quit 退出\n")
     while True:
         try:
             cve_id = console.input("[bold green]CVE>[/bold green] ").strip()
@@ -1212,6 +1300,10 @@ def interactive_loop() -> None:
             break
         if cve_id.lower() in ("batch", "b"):
             run_batch()
+            console.print()
+            continue
+        if cve_id.lower() in ("continue", "resume", "cont"):
+            run_continue()
             console.print()
             continue
         if cve_id.lower() in ("classify", "filter", "c"):
@@ -1280,18 +1372,23 @@ def main():
         run_update_nvd(years=nvd_years, force=args.update_nvd_force)
         return
 
-    selected_modes = sum(1 for enabled in (args.batch, args.classify, args.stats, args.retry_http_failed) if enabled)
+    selected_modes = sum(1 for enabled in (args.batch, args.continue_mode, args.classify, args.stats, args.retry_http_failed) if enabled)
     if selected_modes > 1:
-        raise SystemExit("--batch、--classify、--stats 和 --retry-http-failed 不能同时使用")
+        raise SystemExit("--batch、--continue、--classify、--stats 和 --retry-http-failed 不能同时使用")
 
     if args.batch:
         batch_file = args.file or args.cve_id
-        run_batch(batch_file, args.start, args.end, args.terminals)
+        run_batch(batch_file, args.start, args.end, args.terminals, generate_report=args.report)
+        return
+
+    if args.continue_mode:
+        continue_file = args.file or args.cve_id
+        run_continue(continue_file, args.terminals, generate_report=args.report)
         return
 
     if args.classify:
         if args.terminals is not None:
-            raise SystemExit("--terminals 只能和 --batch 或 --retry-http-failed 一起使用")
+            raise SystemExit("--terminals 只能和 --batch、--continue 或 --retry-http-failed 一起使用")
         classify_file = args.file or args.cve_id
         run_classify(classify_file, args.start, args.end)
         return
@@ -1313,11 +1410,12 @@ def main():
             args.retry_shards,
             args.retry_mode,
             retry_status_codes,
+            generate_report=args.report,
         )
         return
 
     if args.file or args.start is not None or args.end is not None or args.terminals is not None:
-        raise SystemExit("--file/--start/--end/--terminals 只能和对应启动项一起使用")
+        raise SystemExit("--file/--start/--end/--terminals 只能和 --batch/--continue/--retry-http-failed 一起使用")
 
     if args.cve_id:
         run_cve(args.cve_id)
