@@ -28,9 +28,11 @@ from cve_hunter.classifier import classify_http_vuln_from_info
 from cve_hunter.config import cfg
 from cve_hunter.state import CVEState
 from cve_hunter.llm import invoke_llm
+from cve_hunter.poc_parser import extract_http_requests, parse_poc_candidates_json
 from cve_hunter.prompts.templates import (
     POC_GENERATION_FROM_REFS,
     POC_GENERATION_FROM_SEARCH,
+    POC_REFLECTION_AFTER_VERIFY,
     ANALYSIS_REPORT,
 )
 from cve_hunter.tools.nvd import query_nvd
@@ -159,20 +161,31 @@ def node_local_kb_search(state: CVEState) -> dict:
 
             if result.get("raw_http"):
                 console.print("  [green]✓ 提取到 HTTP PoC[/]")
-                updates.update({
-                    "poc_raw_http": result["raw_http"],
-                    "poc_payloads": [result["raw_http"]],
-                    "poc_source": source_label,
-                    "current_phase": "verify_poc",
-                })
+                updates.update(_candidate_update(
+                    state,
+                    _raw_http_candidates(
+                        [result["raw_http"]],
+                        source=source_label,
+                        evidence_url=result.get("kb_path", ""),
+                        confidence=0.95 if source_label == "local_kb_custom" else 0.75,
+                        reason="本地知识库命中",
+                    ),
+                    fallback_phase="reference_analysis",
+                ))
                 return updates
 
             if result.get("yaml_content"):
-                updates.update({
-                    "poc_nuclei_yaml": result["yaml_content"],
-                    "poc_source": source_label,
-                    "current_phase": "verify_poc",
-                })
+                updates.update(_candidate_update(
+                    state,
+                    [_nuclei_candidate(
+                        result["yaml_content"],
+                        source=source_label,
+                        evidence_url=result.get("kb_path", ""),
+                        confidence=0.9,
+                        reason="本地知识库命中",
+                    )],
+                    fallback_phase="reference_analysis",
+                ))
                 return updates
 
             # trickest-cve 命中但未提取到 HTTP PoC，保留 github_repos 供参考
@@ -247,14 +260,21 @@ def node_poc_from_refs(state: CVEState) -> dict:
 
     try:
         result = invoke_llm(prompt)
-        pocs = _extract_http_requests(result, state.cve_id)
-        if pocs:
-            console.print(f"  [green]✓[/] AI 生成了 {len(pocs)} 个 PoC")
+        candidates = _llm_poc_candidates(
+            result,
+            source="reference",
+            evidence_url=",".join(ref["url"] for ref in state.reference_contents[:3]),
+            confidence=0.65,
+            reason="基于 NVD References 内容由 AI 生成",
+        )
+        if candidates:
+            console.print(f"  [green]✓[/] AI 生成了 {len(candidates)} 个 PoC 候选")
             return {
-                "poc_raw_http": pocs[0],
-                "poc_payloads": pocs,
-                "poc_source": "reference",
-                "current_phase": "verify_poc",
+                **_candidate_update(
+                    state,
+                    candidates,
+                    fallback_phase="nuclei_search",
+                ),
                 "phases_tried": state.phases_tried + ["poc_from_refs"],
             }
     except Exception as e:
@@ -278,9 +298,17 @@ def node_nuclei_search(state: CVEState) -> dict:
         if result.get("found"):
             console.print(f"  [green]✓[/] 找到 nuclei 模板: {result.get('name', '')}")
             return {
-                "poc_nuclei_yaml": result["yaml_content"],
-                "poc_source": "nuclei",
-                "current_phase": "verify_poc",
+                **_candidate_update(
+                    state,
+                    [_nuclei_candidate(
+                        result["yaml_content"],
+                        source="nuclei",
+                        evidence_url=result.get("url", ""),
+                        confidence=0.85,
+                        reason=result.get("name", "nuclei 官方模板"),
+                    )],
+                    fallback_phase="exploitdb_search",
+                ),
                 "phases_tried": state.phases_tried + ["nuclei_search"],
             }
         if result.get("error"):
@@ -315,20 +343,27 @@ def node_exploitdb_search(state: CVEState) -> dict:
             console.print(f"  [green]✓[/] 找到 {len(records)} 个 exploit")
             # 提取 exploit 内容
             extract_errors = []
+            candidates = []
             for rec in records[:2]:
                 content = extract_url_content(rec["url"])
                 if content.get("content"):
                     pocs = _extract_http_requests(content["content"], state.cve_id)
                     if pocs:
-                        return {
-                            "poc_raw_http": pocs[0],
-                            "poc_payloads": pocs,
-                            "poc_source": "exploit-db",
-                            "current_phase": "verify_poc",
-                            "phases_tried": state.phases_tried + ["exploitdb_search"],
-                        }
+                        candidates.extend(_raw_http_candidates(
+                            pocs,
+                            source="exploit-db",
+                            evidence_url=rec["url"],
+                            confidence=0.7,
+                            reason=rec.get("title", "Exploit-DB 结果"),
+                        ))
                 elif content.get("error"):
                     extract_errors.append(f"{rec['url']}: {content.get('error')}")
+            if candidates:
+                console.print(f"  [green]✓[/] 提取到 {len(candidates)} 个 HTTP PoC 候选")
+                return {
+                    **_candidate_update(state, candidates, fallback_phase="imfht_search"),
+                    "phases_tried": state.phases_tried + ["exploitdb_search"],
+                }
             if extract_errors:
                 hint = classify_error(extract_errors[0], source="reference")
                 return {
@@ -369,10 +404,17 @@ def node_imfht_search(state: CVEState) -> dict:
             pocs = _extract_http_requests(result.get("content", ""), state.cve_id)
             if pocs:
                 return {
-                    "poc_raw_http": pocs[0],
-                    "poc_payloads": pocs,
-                    "poc_source": "imfht",
-                    "current_phase": "verify_poc",
+                    **_candidate_update(
+                        state,
+                        _raw_http_candidates(
+                            pocs,
+                            source="imfht",
+                            evidence_url=result.get("url", ""),
+                            confidence=0.6,
+                            reason="imfht 页面提取",
+                        ),
+                        fallback_phase="web_search",
+                    ),
                     "phases_tried": state.phases_tried + ["imfht_search"],
                 }
         if result.get("error"):
@@ -471,14 +513,20 @@ def node_web_search(state: CVEState) -> dict:
 
     try:
         result = invoke_llm(prompt)
-        pocs = _extract_http_requests(result, state.cve_id)
-        if pocs:
-            console.print(f"  [green]✓[/] AI 基于搜索结果生成了 {len(pocs)} 个 PoC")
+        candidates = _llm_poc_candidates(
+            result,
+            source="search",
+            confidence=0.45,
+            reason="基于联网搜索结果由 AI 生成",
+        )
+        if candidates:
+            console.print(f"  [green]✓[/] AI 基于搜索结果生成了 {len(candidates)} 个 PoC 候选")
             return {
-                "poc_raw_http": pocs[0],
-                "poc_payloads": pocs,
-                "poc_source": "search",
-                "current_phase": "verify_poc",
+                **_candidate_update(
+                    state,
+                    candidates,
+                    fallback_phase="generate_report",
+                ),
                 "phases_tried": state.phases_tried + ["web_search"],
             }
     except Exception as e:
@@ -504,7 +552,7 @@ def node_verify_poc(state: CVEState) -> dict:
 
     target = cfg.target_ip
 
-    if state.poc_source == "nuclei" and state.poc_nuclei_yaml:
+    if state.poc_nuclei_yaml:
         console.print("  使用 Nuclei YAML 模板验证...")
         result = send_poc_and_capture(
             nuclei_yaml=state.poc_nuclei_yaml,
@@ -518,7 +566,7 @@ def node_verify_poc(state: CVEState) -> dict:
     else:
         return {
             **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
-            "current_phase": _next_phase_after_verify(state),
+            **_next_attempt_or_phase_update(state),
         }
 
     success = result.get("success", False)
@@ -549,6 +597,7 @@ def node_verify_poc(state: CVEState) -> dict:
         updates["status_code"] = CAPTURE_SUCCESS
         updates["message"] = "PoC 验证成功，IPS CVE 字段匹配当前 CVE"
         updates["current_phase"] = "archive"
+        updates["attempt_history"] = _append_attempt_history(state, result, ips_summary, ips_matched, generic_ips_matched, "cve_ips_matched")
     elif generic_ips_matched:
         console.print(
             f"  [yellow]IPS 有通用/非当前 CVE 命中[/] "
@@ -558,18 +607,74 @@ def node_verify_poc(state: CVEState) -> dict:
         updates.update(make_status_update(state.status_code, IPS_GENERIC_MATCH_ONLY, status_description(IPS_GENERIC_MATCH_ONLY)))
         if not success and result.get("error"):
             updates["error_messages"] = state.error_messages + [result.get("error", "")]
-        updates["current_phase"] = _next_phase_after_verify(state)
+        updates["attempt_history"] = _append_attempt_history(state, result, ips_summary, ips_matched, generic_ips_matched, "generic_ips_only")
+        updates.update(_next_attempt_or_phase_update(state, allow_reflection=True))
     elif success:
         console.print(f"  [yellow]请求成功但当前 CVE IPS 未命中[/] (HTTP {result.get('status_code', '?')})")
-        updates["current_phase"] = _next_phase_after_verify(state)
+        updates["attempt_history"] = _append_attempt_history(state, result, ips_summary, ips_matched, generic_ips_matched, "http_success_no_ips")
+        updates.update(_next_attempt_or_phase_update(state, allow_reflection=True))
     else:
         verify_source = "http2pcap" if cfg.http2pcap_url else "target"
         hint = classify_error(result.get("error", "未知错误"), source=verify_source, error_type=result.get("error_type", ""))
         console.print(f"  [red]✗ 请求失败:[/] {result.get('error', '未知错误')}")
         updates["error_messages"] = state.error_messages + [result.get("error", "")]
         updates.update(make_status_update(state.status_code, hint.code, hint.message))
-        updates["current_phase"] = _next_phase_after_verify(state)
+        updates["attempt_history"] = _append_attempt_history(state, result, ips_summary, ips_matched, generic_ips_matched, "request_failed")
+        updates.update(_next_attempt_or_phase_update(state))
 
+    return updates
+
+
+def node_reflect_after_verify(state: CVEState) -> dict:
+    """验证失败后基于反馈生成少量 PoC 变体。"""
+    console.print("[bold cyan]▶ 反思验证失败并生成变体[/]")
+
+    next_phase = _next_phase_after_verify(state)
+    if not _should_reflect_after_verify(state):
+        return {"current_phase": next_phase}
+
+    current_candidate = _candidate_history_view(_current_candidate(state))
+    prompt = POC_REFLECTION_AFTER_VERIFY.format(
+        cve_id=state.cve_id,
+        description=state.nvd_description or "无",
+        affected_products=", ".join(state.affected_products[:5]) or "无",
+        vuln_type=state.vuln_type or "未知",
+        current_candidate=json.dumps(current_candidate, ensure_ascii=False, indent=2),
+        http_status_code=state.http_status_code or "无",
+        http_response_body=(state.http_response_body or "无")[:1200],
+        ips_matched=state.ips_matched,
+        generic_ips_matched=state.generic_ips_matched,
+        ips_match_summary=json.dumps(state.ips_match_summary, ensure_ascii=False) if state.ips_match_summary else "无",
+        attempt_history=json.dumps(state.attempt_history[-3:], ensure_ascii=False, indent=2) if state.attempt_history else "无",
+    )
+
+    reflection_source = f"{state.poc_source or 'unknown'}_reflection"
+    updates = {
+        "reflection_rounds": state.reflection_rounds + 1,
+        "phases_tried": state.phases_tried + ["reflect_after_verify"],
+    }
+
+    try:
+        result = invoke_llm(prompt)
+        candidates = _llm_poc_candidates(
+            result,
+            source=reflection_source,
+            evidence_url=current_candidate.get("evidence_url", ""),
+            confidence=min(float(current_candidate.get("confidence") or 0.5), 0.6),
+            reason="验证失败后的有限变体",
+        )
+        if candidates:
+            console.print(f"  [green]✓[/] 反思生成 {len(candidates)} 个变体候选")
+            updates.update(_candidate_update(state, candidates, fallback_phase=next_phase))
+            return updates
+        console.print("  [yellow]⚠ 反思未生成有效变体[/]")
+    except Exception as e:
+        hint = classify_error(e, source="llm")
+        console.print(f"  [red]✗ 反思生成失败:[/] {e}")
+        updates["error_messages"] = state.error_messages + [f"反思生成 PoC 变体失败: {e}"]
+        updates.update(make_status_update(state.status_code, hint.code, hint.message))
+
+    updates["current_phase"] = next_phase
     return updates
 
 
@@ -682,6 +787,11 @@ def node_generate_report(state: CVEState) -> dict:
         "vuln_type": state.vuln_type,
         "poc_source": state.poc_source,
         "poc_raw_http": state.poc_raw_http,
+        "poc_candidates": [_candidate_history_view(candidate) for candidate in state.poc_candidates],
+        "current_candidate_index": state.current_candidate_index,
+        "attempt_history": state.attempt_history,
+        "reflection_rounds": state.reflection_rounds,
+        "max_reflection_rounds": state.max_reflection_rounds,
         "phases_tried": state.phases_tried,
         "ips_matched": state.ips_matched,
         "generic_ips_matched": state.generic_ips_matched,
@@ -718,26 +828,222 @@ def node_generate_report(state: CVEState) -> dict:
 # ═══════════════════════════════════════════════════════════
 
 
+def _raw_http_candidates(
+    pocs: list[str],
+    *,
+    source: str,
+    evidence_url: str = "",
+    confidence: float = 0.5,
+    reason: str = "",
+) -> list[dict]:
+    """把提取到的 Raw HTTP PoC 标准化为候选记录。"""
+    candidates = []
+    for poc in pocs:
+        raw_http = poc.strip()
+        if not raw_http:
+            continue
+        candidates.append({
+            "kind": "raw_http",
+            "source": source,
+            "raw_http": raw_http,
+            "nuclei_yaml": "",
+            "evidence_url": evidence_url,
+            "confidence": confidence,
+            "reason": reason,
+        })
+    return candidates
+
+
+def _nuclei_candidate(
+    yaml_content: str,
+    *,
+    source: str,
+    evidence_url: str = "",
+    confidence: float = 0.5,
+    reason: str = "",
+) -> dict:
+    """把 Nuclei YAML 标准化为候选记录。"""
+    return {
+        "kind": "nuclei_yaml",
+        "source": source,
+        "raw_http": "",
+        "nuclei_yaml": yaml_content.strip(),
+        "evidence_url": evidence_url,
+        "confidence": confidence,
+        "reason": reason,
+    }
+
+
+def _candidate_update(state: CVEState, candidates: list[dict], *, fallback_phase: str = "") -> dict:
+    """追加候选并选择第一个新增候选作为当前验证对象。"""
+    unique_candidates = _dedupe_new_candidates(state.poc_candidates, candidates)
+    if not unique_candidates:
+        return {"current_phase": fallback_phase} if fallback_phase else {}
+
+    all_candidates = state.poc_candidates + unique_candidates
+    selected_index = len(state.poc_candidates)
+    raw_payloads = [candidate["raw_http"] for candidate in unique_candidates if candidate.get("raw_http")]
+
+    return {
+        "poc_candidates": all_candidates,
+        "poc_payloads": state.poc_payloads + raw_payloads,
+        "current_phase": "verify_poc",
+        **_select_candidate_update(all_candidates[selected_index], selected_index),
+    }
+
+
+def _dedupe_new_candidates(existing_candidates: list[dict], candidates: list[dict]) -> list[dict]:
+    seen = {_candidate_key(candidate) for candidate in existing_candidates}
+    unique = []
+    for candidate in candidates:
+        key = _candidate_key(candidate)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def _candidate_key(candidate: dict) -> str:
+    kind = candidate.get("kind", "")
+    body = candidate.get("raw_http") or candidate.get("nuclei_yaml") or ""
+    if not kind or not body:
+        return ""
+    return f"{kind}:{body.strip()}"
+
+
+def _select_candidate_update(candidate: dict, index: int) -> dict:
+    return {
+        "current_candidate_index": index,
+        "poc_source": candidate.get("source", ""),
+        "poc_raw_http": candidate.get("raw_http", ""),
+        "poc_nuclei_yaml": candidate.get("nuclei_yaml", ""),
+    }
+
+
+def _next_attempt_or_phase_update(state: CVEState, *, allow_reflection: bool = False) -> dict:
+    """验证失败后优先切换到候选池里的下一个 PoC。"""
+    next_index = state.current_candidate_index + 1
+    if next_index < len(state.poc_candidates):
+        candidate = state.poc_candidates[next_index]
+        console.print(
+            f"  [cyan]-> 尝试下一个 PoC 候选[/] "
+            f"{next_index + 1}/{len(state.poc_candidates)} (来源: {candidate.get('source', 'unknown')})"
+        )
+        return {
+            "current_phase": "verify_poc",
+            **_select_candidate_update(candidate, next_index),
+        }
+
+    if allow_reflection and _should_reflect_after_verify(state):
+        return {"current_phase": "reflect_after_verify"}
+
+    return {"current_phase": _next_phase_after_verify(state)}
+
+
+def _should_reflect_after_verify(state: CVEState) -> bool:
+    if state.reflection_rounds >= state.max_reflection_rounds:
+        return False
+    if not state.poc_raw_http:
+        return False
+    if state.status == "SUCCESS":
+        return False
+    return bool(state.poc_candidates)
+
+
+def _append_attempt_history(
+    state: CVEState,
+    result: dict,
+    ips_summary: dict,
+    ips_matched: bool,
+    generic_ips_matched: bool,
+    outcome: str,
+) -> list[dict]:
+    return state.attempt_history + [{
+        "attempt": len(state.attempt_history) + 1,
+        "candidate_index": state.current_candidate_index if state.poc_candidates else None,
+        "source": state.poc_source,
+        "kind": "nuclei_yaml" if state.poc_nuclei_yaml and not state.poc_raw_http else "raw_http",
+        "outcome": outcome,
+        "request_success": bool(result.get("success", False)),
+        "http_status_code": result.get("status_code", 0),
+        "ips_matched": ips_matched,
+        "generic_ips_matched": generic_ips_matched,
+        "ips_match_summary": deepcopy(ips_summary),
+        "pcap_file_path": result.get("pcap_file_path", ""),
+        "error": result.get("error", ""),
+        "error_type": result.get("error_type", ""),
+        "candidate": _candidate_history_view(_current_candidate(state)),
+        "timestamp": datetime.now().isoformat(),
+    }]
+
+
+def _current_candidate(state: CVEState) -> dict:
+    if 0 <= state.current_candidate_index < len(state.poc_candidates):
+        return state.poc_candidates[state.current_candidate_index]
+    return {
+        "kind": "nuclei_yaml" if state.poc_nuclei_yaml and not state.poc_raw_http else "raw_http",
+        "source": state.poc_source,
+        "raw_http": state.poc_raw_http,
+        "nuclei_yaml": state.poc_nuclei_yaml,
+        "evidence_url": "",
+        "confidence": 0.0,
+        "reason": "legacy state",
+    }
+
+
+def _candidate_history_view(candidate: dict) -> dict:
+    """生成适合写入 result.json 的候选摘要，避免 YAML 体积过大。"""
+    return {
+        "kind": candidate.get("kind", ""),
+        "source": candidate.get("source", ""),
+        "evidence_url": candidate.get("evidence_url", ""),
+        "confidence": candidate.get("confidence", 0.0),
+        "reason": candidate.get("reason", ""),
+        "raw_http": candidate.get("raw_http", ""),
+        "nuclei_yaml_preview": candidate.get("nuclei_yaml", "")[:2000],
+    }
+
+
+def _llm_poc_candidates(
+    text: str,
+    *,
+    source: str,
+    evidence_url: str = "",
+    confidence: float = 0.5,
+    reason: str = "",
+) -> list[dict]:
+    """Parse LLM output as JSON first, then fall back to legacy Raw HTTP."""
+    parsed_candidates = parse_poc_candidates_json(text)
+    if parsed_candidates:
+        candidates = []
+        for candidate in parsed_candidates:
+            raw_http = candidate.get("raw_http", "").strip()
+            if not raw_http:
+                continue
+            candidates.append({
+                "kind": "raw_http",
+                "source": source,
+                "raw_http": raw_http,
+                "nuclei_yaml": "",
+                "evidence_url": candidate.get("evidence_url") or evidence_url,
+                "confidence": candidate.get("confidence", confidence),
+                "reason": candidate.get("reason") or reason,
+            })
+        return candidates
+
+    return _raw_http_candidates(
+        _extract_http_requests(text, ""),
+        source=source,
+        evidence_url=evidence_url,
+        confidence=confidence,
+        reason=reason,
+    )
+
+
 def _extract_http_requests(text: str, cve_id: str) -> list[str]:
     """从 LLM 输出或网页文本中提取 HTTP 请求。"""
-    requests = []
-
-    # 提取 ```http ... ``` 代码块
-    pattern = r"```(?:http)?\s*\n((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+.*?)```"
-    for m in re.finditer(pattern, text, re.DOTALL | re.IGNORECASE):
-        req = m.group(1).strip()
-        if req and "HTTP/" in req:
-            requests.append(req)
-
-    # 直接匹配原始 HTTP 请求格式
-    if not requests:
-        pattern2 = r"((?:GET|POST|PUT|DELETE|PATCH)\s+/\S*\s+HTTP/[\d.]+\r?\n(?:[^\n]+\r?\n)*\r?\n(?:.*)?)"
-        for m in re.finditer(pattern2, text, re.DOTALL):
-            req = m.group(1).strip()
-            if len(req) > 30:
-                requests.append(req)
-
-    return requests
+    return extract_http_requests(text)
 
 
 def _next_phase_after_verify(state: CVEState) -> str:
@@ -793,6 +1099,7 @@ def route_after_phase(state: CVEState) -> str:
         "imfht_search": "imfht_search",
         "web_search": "web_search",
         "verify_poc": "verify_poc",
+        "reflect_after_verify": "reflect_after_verify",
         "archive": "archive",
         "save_to_local_kb": "save_to_local_kb",
         "generate_report": "generate_report",
@@ -823,6 +1130,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("imfht_search", node_imfht_search)
     workflow.add_node("web_search", node_web_search)
     workflow.add_node("verify_poc", node_verify_poc)
+    workflow.add_node("reflect_after_verify", node_reflect_after_verify)
     workflow.add_node("archive", node_archive)
     workflow.add_node("save_to_local_kb", node_save_to_local_kb)
     workflow.add_node("generate_report", node_generate_report)
@@ -839,8 +1147,8 @@ def build_graph() -> StateGraph:
 
     # PoC 搜索链和验证的路由
     for node in ["poc_from_refs", "nuclei_search", "exploitdb_search",
-                  "imfht_search", "web_search", "verify_poc", "archive",
-                  "save_to_local_kb"]:
+                  "imfht_search", "web_search", "verify_poc",
+                  "reflect_after_verify", "archive", "save_to_local_kb"]:
         workflow.add_conditional_edges(node, route_after_phase)
 
     workflow.add_edge("generate_report", END)

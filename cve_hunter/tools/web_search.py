@@ -13,7 +13,15 @@ def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
     返回 [{"title": ..., "url": ..., "content": ...}, ...]
     """
     if cfg.tavily_api_key:
-        return _search_tavily(query, max_results)
+        tavily_results = _search_tavily(query, max_results)
+        if _has_usable_results(tavily_results):
+            return tavily_results
+
+        duckduckgo_results = _search_duckduckgo(query, max_results)
+        if _has_usable_results(duckduckgo_results):
+            return duckduckgo_results
+
+        return _combined_search_errors(tavily_results, duckduckgo_results) or tavily_results or duckduckgo_results
     return _search_duckduckgo(query, max_results)
 
 
@@ -67,3 +75,26 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
         return results
     except Exception as e:
         return [{"title": "搜索错误", "url": "", "content": str(e)}]
+
+
+def _has_usable_results(results: list[dict[str, str]]) -> bool:
+    """判断搜索结果中是否有可用于后续提取的条目。"""
+    return any(
+        item.get("title") != "搜索错误" and (item.get("url") or item.get("content"))
+        for item in results
+    )
+
+
+def _combined_search_errors(
+    primary_results: list[dict[str, str]],
+    fallback_results: list[dict[str, str]],
+) -> list[dict[str, str]]:
+    errors = []
+    for label, results in (("Tavily", primary_results), ("DuckDuckGo", fallback_results)):
+        for item in results:
+            if item.get("title") == "搜索错误" and item.get("content"):
+                errors.append(f"{label}: {item['content']}")
+
+    if not errors:
+        return []
+    return [{"title": "搜索错误", "url": "", "content": "; ".join(errors)}]

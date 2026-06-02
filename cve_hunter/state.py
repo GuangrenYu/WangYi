@@ -30,6 +30,11 @@ class CVEState:
     poc_raw_http: str = ""
     poc_nuclei_yaml: str = ""
     poc_payloads: list[str] = field(default_factory=list)
+    poc_candidates: list[dict[str, Any]] = field(default_factory=list)
+    current_candidate_index: int = 0
+    attempt_history: list[dict[str, Any]] = field(default_factory=list)
+    reflection_rounds: int = 0
+    max_reflection_rounds: int = 2
 
     # ── 验证结果 ──
     http_status_code: int = 0

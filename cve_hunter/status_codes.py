@@ -118,7 +118,25 @@ def classify_error(error: object, *, source: str = "", error_type: str = "") -> 
     error_text = _error_text(error, error_type)
     lower = error_text.lower()
 
-    if _contains_any(lower, ("insufficient_quota", "quota exceeded", "quota_exceeded", "balance", "billing", "credit", "exhausted", "quota", "额度", "配额", "余额", "欠费")):
+    if _contains_any(lower, (
+        "insufficient_quota",
+        "quota exceeded",
+        "quota_exceeded",
+        "balance",
+        "billing",
+        "credit",
+        "exhausted",
+        "quota",
+        "usage limit",
+        "usage_limit",
+        "exceeds your plan",
+        "upgrade your plan",
+        "set usage limit",
+        "额度",
+        "配额",
+        "余额",
+        "欠费",
+    )):
         return StatusHint(API_QUOTA_EXHAUSTED, f"{source or 'API'} 额度或余额耗尽: {error_text}")
 
     api_like_source = source_key in {"llm", "tavily", "api", "nvd"}

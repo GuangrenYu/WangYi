@@ -18,6 +18,14 @@ class StatusCodeClassificationTests(unittest.TestCase):
 
         self.assertEqual(hint.code, API_QUOTA_EXHAUSTED)
 
+    def test_search_plan_usage_limit_is_quota_exhausted(self):
+        hint = classify_error(
+            "This request exceeds your plan's set usage limit. Please upgrade your plan.",
+            source="web_search",
+        )
+
+        self.assertEqual(hint.code, API_QUOTA_EXHAUSTED)
+
     def test_api_auth_failed(self):
         hint = classify_error("401 unauthorized invalid api key", source="llm")
 

@@ -16,6 +16,7 @@ from pathlib import Path
 import httpx
 
 from cve_hunter.config import cfg
+from cve_hunter.poc_parser import extract_http_requests
 
 
 # ── 路径辅助 ──
@@ -209,22 +210,7 @@ def _guess_raw_urls(github_url: str) -> list[str]:
 
 def _extract_http_requests(text: str, cve_id: str) -> list[str]:
     """从文本中提取 HTTP 请求。"""
-    requests = []
-
-    pattern = r"```(?:http)?\s*\n((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+.*?)```"
-    for m in re.finditer(pattern, text, re.DOTALL | re.IGNORECASE):
-        req = m.group(1).strip()
-        if req and "HTTP/" in req:
-            requests.append(req)
-
-    if not requests:
-        pattern2 = r"((?:GET|POST|PUT|DELETE|PATCH)\s+/\S*\s+HTTP/[\d.]+\r?\n(?:[^\n]+\r?\n)*\r?\n(?:.*)?)"
-        for m in re.finditer(pattern2, text, re.DOTALL):
-            req = m.group(1).strip()
-            if len(req) > 30:
-                requests.append(req)
-
-    return requests
+    return extract_http_requests(text)
 
 
 # ── 保存 ──
