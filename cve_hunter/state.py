@@ -36,6 +36,14 @@ class CVEState:
     reflection_rounds: int = 0
     max_reflection_rounds: int = 2
 
+    # ── Agent 中间产物 ──
+    agent_trace: list[dict[str, Any]] = field(default_factory=list)
+    environment_candidates: list[dict[str, Any]] = field(default_factory=list)
+    attack_environment: dict[str, Any] = field(default_factory=dict)
+    trigger_candidates: list[dict[str, Any]] = field(default_factory=list)
+    validation_hints: list[dict[str, Any]] = field(default_factory=list)
+    candidate_reviews: list[dict[str, Any]] = field(default_factory=list)
+
     # ── 验证结果 ──
     http_status_code: int = 0
     http_response_body: str = ""
@@ -46,6 +54,12 @@ class CVEState:
     cve_ips_match_details: list[dict[str, Any]] = field(default_factory=list)
     generic_ips_match_details: list[dict[str, Any]] = field(default_factory=list)
     ips_match_summary: dict[str, Any] = field(default_factory=dict)
+    executor_result: dict[str, Any] = field(default_factory=dict)
+    oracle_result: dict[str, Any] = field(default_factory=dict)
+    target_oracle_success: bool = False
+    target_oracle_type: str = ""
+    target_oracle_details: dict[str, Any] = field(default_factory=dict)
+    success_level: str = ""
 
     # ── 流程控制 ──
     current_phase: str = "init"

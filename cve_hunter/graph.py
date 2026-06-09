@@ -28,6 +28,12 @@ from cve_hunter.classifier import classify_http_vuln_from_info
 from cve_hunter.config import cfg
 from cve_hunter.state import CVEState
 from cve_hunter.llm import invoke_llm
+from cve_hunter.agents import (
+    append_agent_trace,
+    run_critic_agent,
+    run_environment_agent,
+    run_trigger_agent,
+)
 from cve_hunter.poc_parser import extract_http_requests, parse_poc_candidates_json
 from cve_hunter.prompts.templates import (
     POC_GENERATION_FROM_REFS,
@@ -40,11 +46,11 @@ from cve_hunter.tools.web_extract import extract_url_content
 from cve_hunter.tools.poc_sources import search_nuclei, search_exploitdb, search_imfht
 from cve_hunter.tools.local_kb import search_local_kb, save_to_local_kb
 from cve_hunter.tools.web_search import search_web
-from cve_hunter.tools.http_sender import send_poc_and_capture
-from cve_hunter.ips_match import classify_ips_matches, summarize_ips_classification
+from cve_hunter.verification import evaluate_success, execute_candidate
 from cve_hunter.status_codes import (
     AI_REPRODUCTION_FAILED,
     CAPTURE_SUCCESS,
+    INFRASTRUCTURE_FAILED,
     IPS_GENERIC_MATCH_ONLY,
     NOT_HTTP_VULN,
     PARAMETER_ERROR,
@@ -115,7 +121,7 @@ def node_vuln_type_check(state: CVEState) -> dict:
 
     if not state.nvd_description:
         console.print("  [yellow]⚠ 无 NVD 描述，默认为 HTTP 漏洞继续处理[/]")
-        return {"is_http_vuln": True, "vuln_type": "未知", "current_phase": "reference_analysis"}
+        return {"is_http_vuln": True, "vuln_type": "未知", "current_phase": "environment_agent"}
 
     result = classify_http_vuln_from_info(
         cve_id=state.cve_id,
@@ -142,8 +148,28 @@ def node_vuln_type_check(state: CVEState) -> dict:
     return {
         "is_http_vuln": result.is_http_vuln,
         "vuln_type": result.vuln_type,
+        "current_phase": "environment_agent",
+    }
+
+
+def node_environment_agent(state: CVEState) -> dict:
+    """EnvironmentAgent：规划并按配置自动搭建攻击环境。"""
+    console.print("[bold cyan]▶ EnvironmentAgent 攻击环境规划[/]")
+    result = run_environment_agent(state)
+    trace = result["trace"]
+    updates = {
+        "environment_candidates": result["environment_candidates"],
+        "attack_environment": result["attack_environment"],
+        "agent_trace": append_agent_trace(state, **trace),
         "current_phase": "local_kb_search",
     }
+    if result.get("errors"):
+        updates["error_messages"] = state.error_messages + result["errors"]
+        if cfg.auto_env_enabled:
+            updates.update(make_status_update(state.status_code, INFRASTRUCTURE_FAILED, result["errors"][0]))
+    env = result["attack_environment"]
+    console.print(f"  [green]✓[/] target={env.get('target_url', '')} source={env.get('source', '')}")
+    return updates
 
 
 def node_local_kb_search(state: CVEState) -> dict:
@@ -210,7 +236,7 @@ def node_reference_analysis(state: CVEState) -> dict:
     """提取 NVD References 中的网页内容并分析。"""
     console.print(f"[bold cyan]▶ 分析 References[/] ({len(state.nvd_references)} 个链接)")
     if not state.nvd_references:
-        return {"current_phase": "poc_from_refs", "phases_tried": state.phases_tried + ["reference_analysis"]}
+        return {"current_phase": "trigger_agent", "phases_tried": state.phases_tried + ["reference_analysis"]}
 
     contents = []
     errors = []
@@ -225,7 +251,7 @@ def node_reference_analysis(state: CVEState) -> dict:
     console.print(f"  [green]✓[/] 成功提取 {len(contents)} 个页面内容")
     updates = {
         "reference_contents": contents,
-        "current_phase": "poc_from_refs",
+        "current_phase": "trigger_agent",
         "phases_tried": state.phases_tried + ["reference_analysis"],
     }
     if errors:
@@ -550,33 +576,49 @@ def node_verify_poc(state: CVEState) -> dict:
     """发送 PoC 并验证。"""
     console.print(f"[bold cyan]▶ 验证 PoC[/] (来源: {state.poc_source})")
 
-    target = cfg.target_ip
+    candidate = _current_candidate(state)
+    critic = run_critic_agent(state, candidate)
+    candidate = critic["candidate"]
+    agent_trace = append_agent_trace(state, **critic["trace"])
+    candidate_update = _replace_current_candidate_update(state, candidate)
 
-    if state.poc_nuclei_yaml:
-        console.print("  使用 Nuclei YAML 模板验证...")
-        result = send_poc_and_capture(
-            nuclei_yaml=state.poc_nuclei_yaml,
-            target_url=f"http://{target}",
-        )
-    elif state.poc_raw_http:
-        # 原始 HTTP 请求验证
-        raw = state.poc_raw_http.replace("{{TARGET_HOST}}", target)
-        console.print(f"  发送 HTTP 请求到 {target}...")
-        result = send_poc_and_capture(raw_http=raw)
-    else:
+    if not candidate.get("raw_http") and not candidate.get("nuclei_yaml") and not candidate.get("request_steps"):
         return {
+            "candidate_reviews": state.candidate_reviews + [critic["review"]],
+            "agent_trace": agent_trace,
+            **candidate_update,
             **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
             **_next_attempt_or_phase_update(state),
         }
 
+    environment = state.attack_environment or {}
+    target = environment.get("target_host") or cfg.target_ip
+    console.print(f"  发送候选到 {target}...")
+    result = execute_candidate(candidate, environment)
+    oracle = evaluate_success(state=state, candidate=candidate, result=result, environment=environment)
+
     success = result.get("success", False)
-    ips_matches = result.get("ips_matches", [])
-    ips_classification = classify_ips_matches(ips_matches, state.cve_id)
-    ips_summary = summarize_ips_classification(ips_classification)
-    ips_matched = ips_classification["ips_matched"]
-    generic_ips_matched = ips_classification["generic_ips_matched"]
+    ips_summary = oracle["ips_summary"]
+    ips_classification = oracle["ips_classification"]
+    ips_matched = oracle["ips_matched"]
+    generic_ips_matched = oracle["generic_ips_matched"]
+    target_oracle = oracle["target_oracle"]
 
     updates = {
+        "candidate_reviews": state.candidate_reviews + [critic["review"]],
+        "agent_trace": _append_agent_event(
+            agent_trace,
+            agent="VerifierAgent",
+            action="execute_and_evaluate",
+            status=oracle["outcome"],
+            summary=oracle["message"],
+            data={
+                "executor": result.get("executor", ""),
+                "success_level": oracle["success_level"],
+                "target_oracle": target_oracle,
+            },
+        ),
+        **candidate_update,
         "http_status_code": result.get("status_code", 0),
         "http_response_body": result.get("body", "")[:2000],
         "pcap_file_path": result.get("pcap_file_path", ""),
@@ -586,6 +628,12 @@ def node_verify_poc(state: CVEState) -> dict:
         "cve_ips_match_details": ips_classification["cve_matches"],
         "generic_ips_match_details": ips_classification["generic_matches"],
         "ips_match_summary": ips_summary,
+        "executor_result": result,
+        "oracle_result": oracle,
+        "target_oracle_success": bool(target_oracle.get("success", False)),
+        "target_oracle_type": target_oracle.get("type", ""),
+        "target_oracle_details": target_oracle,
+        "success_level": oracle["success_level"],
     }
 
     if ips_matched:
@@ -597,7 +645,23 @@ def node_verify_poc(state: CVEState) -> dict:
         updates["status_code"] = CAPTURE_SUCCESS
         updates["message"] = "PoC 验证成功，IPS CVE 字段匹配当前 CVE"
         updates["current_phase"] = "archive"
-        updates["attempt_history"] = _append_attempt_history(state, result, ips_summary, ips_matched, generic_ips_matched, "cve_ips_matched")
+        updates["attempt_history"] = _append_attempt_history(
+            state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
+            oracle_result=oracle, candidate=candidate,
+        )
+    elif target_oracle.get("success"):
+        console.print(
+            f"  [bold green]✓ 目标侧 oracle 验证成功[/] "
+            f"type={target_oracle.get('type', 'unknown')}"
+        )
+        updates["status"] = "SUCCESS"
+        updates["status_code"] = oracle["status_code"]
+        updates["message"] = oracle["message"]
+        updates["current_phase"] = "archive"
+        updates["attempt_history"] = _append_attempt_history(
+            state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
+            oracle_result=oracle, candidate=candidate,
+        )
     elif generic_ips_matched:
         console.print(
             f"  [yellow]IPS 有通用/非当前 CVE 命中[/] "
@@ -607,11 +671,21 @@ def node_verify_poc(state: CVEState) -> dict:
         updates.update(make_status_update(state.status_code, IPS_GENERIC_MATCH_ONLY, status_description(IPS_GENERIC_MATCH_ONLY)))
         if not success and result.get("error"):
             updates["error_messages"] = state.error_messages + [result.get("error", "")]
-        updates["attempt_history"] = _append_attempt_history(state, result, ips_summary, ips_matched, generic_ips_matched, "generic_ips_only")
+        updates["attempt_history"] = _append_attempt_history(
+            state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
+            oracle_result=oracle, candidate=candidate,
+        )
         updates.update(_next_attempt_or_phase_update(state, allow_reflection=True))
     elif success:
-        console.print(f"  [yellow]请求成功但当前 CVE IPS 未命中[/] (HTTP {result.get('status_code', '?')})")
-        updates["attempt_history"] = _append_attempt_history(state, result, ips_summary, ips_matched, generic_ips_matched, "http_success_no_ips")
+        console.print(
+            f"  [yellow]请求成功但没有利用成功证据[/] "
+            f"(HTTP {result.get('status_code', '?')}, oracle={target_oracle.get('type', 'none')})"
+        )
+        updates.update(make_status_update(state.status_code, oracle["status_code"], oracle["message"]))
+        updates["attempt_history"] = _append_attempt_history(
+            state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
+            oracle_result=oracle, candidate=candidate,
+        )
         updates.update(_next_attempt_or_phase_update(state, allow_reflection=True))
     else:
         verify_source = "http2pcap" if cfg.http2pcap_url else "target"
@@ -619,10 +693,30 @@ def node_verify_poc(state: CVEState) -> dict:
         console.print(f"  [red]✗ 请求失败:[/] {result.get('error', '未知错误')}")
         updates["error_messages"] = state.error_messages + [result.get("error", "")]
         updates.update(make_status_update(state.status_code, hint.code, hint.message))
-        updates["attempt_history"] = _append_attempt_history(state, result, ips_summary, ips_matched, generic_ips_matched, "request_failed")
+        updates["attempt_history"] = _append_attempt_history(
+            state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
+            oracle_result=oracle, candidate=candidate,
+        )
         updates.update(_next_attempt_or_phase_update(state))
 
     return updates
+
+
+def node_trigger_agent(state: CVEState) -> dict:
+    """TriggerAgent：抽象漏洞触发逻辑和默认验证 hint。"""
+    console.print("[bold cyan]▶ TriggerAgent 抽象触发逻辑[/]")
+    result = run_trigger_agent(state)
+    trigger = result["trigger_candidates"][0] if result["trigger_candidates"] else {}
+    console.print(
+        f"  [green]✓[/] objective={trigger.get('attack_objective', 'unknown')} "
+        f"oracle={trigger.get('validation_hint', {}).get('type', 'none')}"
+    )
+    return {
+        "trigger_candidates": result["trigger_candidates"],
+        "validation_hints": result["validation_hints"],
+        "agent_trace": append_agent_trace(state, **result["trace"]),
+        "current_phase": "poc_from_refs",
+    }
 
 
 def node_reflect_after_verify(state: CVEState) -> dict:
@@ -679,8 +773,8 @@ def node_reflect_after_verify(state: CVEState) -> dict:
 
 
 def node_archive(state: CVEState) -> dict:
-    """IPS 命中成功后的快速归档。"""
-    console.print("[bold cyan]▶ 当前 CVE IPS 命中，进入归档[/]")
+    """验证成功后的快速归档。"""
+    console.print("[bold cyan]▶ 验证成功，进入归档[/]")
     return {"current_phase": "save_to_local_kb"}
 
 
@@ -790,6 +884,18 @@ def node_generate_report(state: CVEState) -> dict:
         "poc_candidates": [_candidate_history_view(candidate) for candidate in state.poc_candidates],
         "current_candidate_index": state.current_candidate_index,
         "attempt_history": state.attempt_history,
+        "agent_trace": state.agent_trace,
+        "environment_candidates": state.environment_candidates,
+        "attack_environment": state.attack_environment,
+        "trigger_candidates": state.trigger_candidates,
+        "validation_hints": state.validation_hints,
+        "candidate_reviews": state.candidate_reviews,
+        "executor_result": state.executor_result,
+        "oracle_result": state.oracle_result,
+        "target_oracle_success": state.target_oracle_success,
+        "target_oracle_type": state.target_oracle_type,
+        "target_oracle_details": state.target_oracle_details,
+        "success_level": state.success_level,
         "reflection_rounds": state.reflection_rounds,
         "max_reflection_rounds": state.max_reflection_rounds,
         "phases_tried": state.phases_tried,
@@ -912,6 +1018,25 @@ def _candidate_key(candidate: dict) -> str:
     return f"{kind}:{body.strip()}"
 
 
+def _replace_current_candidate_update(state: CVEState, candidate: dict) -> dict:
+    """Replace the currently selected candidate after CriticAgent enrichment."""
+    if not state.poc_candidates or not (0 <= state.current_candidate_index < len(state.poc_candidates)):
+        return {
+            "poc_source": candidate.get("source", state.poc_source),
+            "poc_raw_http": candidate.get("raw_http", state.poc_raw_http),
+            "poc_nuclei_yaml": candidate.get("nuclei_yaml", state.poc_nuclei_yaml),
+        }
+
+    candidates = list(state.poc_candidates)
+    candidates[state.current_candidate_index] = candidate
+    return {
+        "poc_candidates": candidates,
+        "poc_source": candidate.get("source", state.poc_source),
+        "poc_raw_http": candidate.get("raw_http", ""),
+        "poc_nuclei_yaml": candidate.get("nuclei_yaml", ""),
+    }
+
+
 def _select_candidate_update(candidate: dict, index: int) -> dict:
     return {
         "current_candidate_index": index,
@@ -958,7 +1083,12 @@ def _append_attempt_history(
     ips_matched: bool,
     generic_ips_matched: bool,
     outcome: str,
+    *,
+    oracle_result: dict | None = None,
+    candidate: dict | None = None,
 ) -> list[dict]:
+    oracle_result = oracle_result or {}
+    target_oracle = oracle_result.get("target_oracle", {})
     return state.attempt_history + [{
         "attempt": len(state.attempt_history) + 1,
         "candidate_index": state.current_candidate_index if state.poc_candidates else None,
@@ -969,11 +1099,18 @@ def _append_attempt_history(
         "http_status_code": result.get("status_code", 0),
         "ips_matched": ips_matched,
         "generic_ips_matched": generic_ips_matched,
+        "target_oracle_success": bool(target_oracle.get("success", False)),
+        "target_oracle_type": target_oracle.get("type", ""),
+        "target_oracle": deepcopy(target_oracle),
+        "success_level": oracle_result.get("success_level", ""),
         "ips_match_summary": deepcopy(ips_summary),
         "pcap_file_path": result.get("pcap_file_path", ""),
         "error": result.get("error", ""),
         "error_type": result.get("error_type", ""),
-        "candidate": _candidate_history_view(_current_candidate(state)),
+        "executor": result.get("executor", ""),
+        "target_url": result.get("target_url", ""),
+        "target_host": result.get("target_host", ""),
+        "candidate": _candidate_history_view(candidate or _current_candidate(state)),
         "timestamp": datetime.now().isoformat(),
     }]
 
@@ -997,6 +1134,10 @@ def _candidate_history_view(candidate: dict) -> dict:
     return {
         "kind": candidate.get("kind", ""),
         "source": candidate.get("source", ""),
+        "trigger_id": candidate.get("trigger_id", ""),
+        "attack_objective": candidate.get("attack_objective", ""),
+        "validation_hint": candidate.get("validation_hint", {}),
+        "preconditions": candidate.get("preconditions", []),
         "evidence_url": candidate.get("evidence_url", ""),
         "confidence": candidate.get("confidence", 0.0),
         "reason": candidate.get("reason", ""),
@@ -1061,6 +1202,25 @@ def _next_phase_after_verify(state: CVEState) -> str:
     return "generate_report"
 
 
+def _append_agent_event(
+    trace: list[dict],
+    *,
+    agent: str,
+    action: str,
+    status: str,
+    summary: str,
+    data: dict | None = None,
+) -> list[dict]:
+    return trace + [{
+        "agent": agent,
+        "action": action,
+        "status": status,
+        "summary": summary,
+        "data": data or {},
+        "timestamp": datetime.now().isoformat(),
+    }]
+
+
 # ═══════════════════════════════════════════════════════════
 # 路由函数
 # ═══════════════════════════════════════════════════════════
@@ -1075,7 +1235,7 @@ def route_after_validate(state: CVEState) -> str:
 def route_after_type_check(state: CVEState) -> str:
     if not state.is_http_vuln:
         return "generate_report"
-    return "local_kb_search"
+    return "environment_agent"
 
 
 def route_after_local_kb(state: CVEState) -> str:
@@ -1091,8 +1251,10 @@ def route_after_phase(state: CVEState) -> str:
     phase_map = {
         "nvd_query": "query_nvd",
         "vuln_type_check": "vuln_type_check",
+        "environment_agent": "environment_agent",
         "local_kb_search": "local_kb_search",
         "reference_analysis": "reference_analysis",
+        "trigger_agent": "trigger_agent",
         "poc_from_refs": "poc_from_refs",
         "nuclei_search": "nuclei_search",
         "exploitdb_search": "exploitdb_search",
@@ -1122,8 +1284,10 @@ def build_graph() -> StateGraph:
     workflow.add_node("validate_input", node_validate_input)
     workflow.add_node("query_nvd", node_query_nvd)
     workflow.add_node("vuln_type_check", node_vuln_type_check)
+    workflow.add_node("environment_agent", node_environment_agent)
     workflow.add_node("local_kb_search", node_local_kb_search)
     workflow.add_node("reference_analysis", node_reference_analysis)
+    workflow.add_node("trigger_agent", node_trigger_agent)
     workflow.add_node("poc_from_refs", node_poc_from_refs)
     workflow.add_node("nuclei_search", node_nuclei_search)
     workflow.add_node("exploitdb_search", node_exploitdb_search)
@@ -1142,8 +1306,10 @@ def build_graph() -> StateGraph:
     workflow.add_conditional_edges("validate_input", route_after_validate)
     workflow.add_edge("query_nvd", "vuln_type_check")
     workflow.add_conditional_edges("vuln_type_check", route_after_type_check)
+    workflow.add_edge("environment_agent", "local_kb_search")
     workflow.add_conditional_edges("local_kb_search", route_after_local_kb)
-    workflow.add_edge("reference_analysis", "poc_from_refs")
+    workflow.add_edge("reference_analysis", "trigger_agent")
+    workflow.add_edge("trigger_agent", "poc_from_refs")
 
     # PoC 搜索链和验证的路由
     for node in ["poc_from_refs", "nuclei_search", "exploitdb_search",

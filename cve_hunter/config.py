@@ -24,6 +24,10 @@ class Config:
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
     llm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "https://api.deepseek.com"))
     llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "deepseek-chat"))
+    agent_llm_enabled: bool = field(
+        default_factory=lambda: os.getenv("AGENT_LLM_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    )
+    agent_llm_model: str = field(default_factory=lambda: os.getenv("AGENT_LLM_MODEL", ""))
 
     nvd_api_key: str = field(default_factory=lambda: os.getenv("NVD_API_KEY", ""))
 
@@ -53,6 +57,19 @@ class Config:
     # 目标 IP（用于 nuclei PoC 验证）
     target_ip: str = field(default_factory=lambda: os.getenv("TARGET_IP", "127.0.0.1"))
 
+    # 自动攻击环境搭建（默认关闭，避免批量任务意外拉镜像/启动容器）
+    auto_env_enabled: bool = field(
+        default_factory=lambda: os.getenv("AUTO_ENV_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
+    )
+    # 本地 vulhub 目录；若存在 **/<CVE-ID>/docker-compose.yml，可自动规划/启动
+    vulhub_dir: str = field(default_factory=lambda: os.getenv("VULHUB_DIR", "vulhub"))
+    # 显式指定 docker-compose 文件时优先使用
+    attack_env_compose_file: str = field(default_factory=lambda: os.getenv("ATTACK_ENV_COMPOSE_FILE", ""))
+    # 自动环境目标 URL；不配置时从 compose 端口映射猜测，猜不到则回退 TARGET_IP
+    attack_env_target_url: str = field(default_factory=lambda: os.getenv("ATTACK_ENV_TARGET_URL", ""))
+    # SSRF/RCE 等目标侧 oracle 可使用的回连地址
+    callback_url: str = field(default_factory=lambda: os.getenv("CALLBACK_URL", ""))
+
     # HTTP/HTTPS 代理
     proxy: str = field(default_factory=_get_proxy)
 
@@ -60,6 +77,11 @@ class Config:
     def httpx_proxy(self) -> str | None:
         """返回 httpx 可用的代理地址，无代理则 None。"""
         return self.proxy or None
+
+    @property
+    def effective_agent_llm_model(self) -> str:
+        """Agent 专用模型；未配置时复用主 LLM_MODEL。"""
+        return self.agent_llm_model or self.llm_model
 
 
 cfg = Config()

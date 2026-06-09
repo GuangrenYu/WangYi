@@ -10,35 +10,35 @@ import re
 
 from cve_hunter.config import cfg
 
-_llm = None
+_llm_cache = {}
 
 
 def _is_llm_available() -> bool:
     return bool(cfg.llm_api_key)
 
 
-def get_llm():
-    global _llm
-    if _llm is None:
+def get_llm(*, model: str | None = None, temperature: float = 0.2, max_tokens: int = 4096):
+    cache_key = (model or cfg.llm_model, temperature, max_tokens)
+    if cache_key not in _llm_cache:
         if not _is_llm_available():
             return None
         import httpx as _httpx
         from langchain_openai import ChatOpenAI
         http_client = _httpx.Client(proxy=cfg.httpx_proxy) if cfg.httpx_proxy else None
-        _llm = ChatOpenAI(
-            model=cfg.llm_model,
+        _llm_cache[cache_key] = ChatOpenAI(
+            model=cache_key[0],
             api_key=cfg.llm_api_key,
             base_url=cfg.llm_base_url,
-            temperature=0.2,
-            max_tokens=4096,
+            temperature=temperature,
+            max_tokens=max_tokens,
             http_client=http_client,
         )
-    return _llm
+    return _llm_cache[cache_key]
 
 
-def invoke_llm(prompt: str) -> str:
+def invoke_llm(prompt: str, *, model: str | None = None, temperature: float = 0.2, max_tokens: int = 4096) -> str:
     """调用 LLM 并返回纯文本结果。无 API Key 时使用规则降级。"""
-    llm = get_llm()
+    llm = get_llm(model=model, temperature=temperature, max_tokens=max_tokens)
     if llm is not None:
         resp = llm.invoke(prompt)
         return resp.content

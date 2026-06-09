@@ -1,4 +1,5 @@
 import unittest
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from cve_hunter.graph import (
@@ -154,8 +155,9 @@ class GraphCandidateTests(unittest.TestCase):
 
         with (
             patch("cve_hunter.graph.console.quiet", True),
+            patch("cve_hunter.agents.cfg", SimpleNamespace(agent_llm_enabled=False)),
             patch(
-                "cve_hunter.graph.send_poc_and_capture",
+                "cve_hunter.graph.execute_candidate",
                 return_value={
                     "success": True,
                     "status_code": 404,
@@ -186,8 +188,9 @@ class GraphCandidateTests(unittest.TestCase):
 
         with (
             patch("cve_hunter.graph.console.quiet", True),
+            patch("cve_hunter.agents.cfg", SimpleNamespace(agent_llm_enabled=False)),
             patch(
-                "cve_hunter.graph.send_poc_and_capture",
+                "cve_hunter.graph.execute_candidate",
                 return_value={
                     "success": False,
                     "error": "connection refused",
