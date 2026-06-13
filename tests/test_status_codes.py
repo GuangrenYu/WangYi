@@ -2,9 +2,12 @@ import unittest
 
 from cve_hunter.status_codes import (
     API_AUTH_FAILED,
+    API_REQUEST_FAILED,
     API_QUOTA_EXHAUSTED,
     API_RATE_LIMITED,
+    EXECUTION_POLICY_BLOCKED,
     NVD_NOT_FOUND,
+    POC_SOURCE_ACCESS_FAILED,
     TARGET_ACCESS_FAILED,
     URL_ACCESS_FAILED,
     classify_error,
@@ -60,6 +63,16 @@ class StatusCodeClassificationTests(unittest.TestCase):
         selected = prefer_status(URL_ACCESS_FAILED, API_QUOTA_EXHAUSTED)
 
         self.assertEqual(selected, API_QUOTA_EXHAUSTED)
+
+    def test_api_request_failure_beats_reference_access_failure(self):
+        selected = prefer_status(URL_ACCESS_FAILED, API_REQUEST_FAILED)
+
+        self.assertEqual(selected, API_REQUEST_FAILED)
+
+    def test_execution_policy_beats_poc_source_access_failure(self):
+        selected = prefer_status(POC_SOURCE_ACCESS_FAILED, EXECUTION_POLICY_BLOCKED)
+
+        self.assertEqual(selected, EXECUTION_POLICY_BLOCKED)
 
 
 if __name__ == "__main__":

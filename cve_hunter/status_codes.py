@@ -32,6 +32,7 @@ TARGET_ORACLE_SUCCESS = "TARGET_ORACLE_SUCCESS"
 TRAFFIC_DETECTED_ONLY = "TRAFFIC_DETECTED_ONLY"
 TARGET_ORACLE_FAILED = "TARGET_ORACLE_FAILED"
 INFRASTRUCTURE_FAILED = "INFRASTRUCTURE_FAILED"
+EXECUTION_POLICY_BLOCKED = "EXECUTION_POLICY_BLOCKED"
 AUTH_OR_PRECONDITION_MISSING = "AUTH_OR_PRECONDITION_MISSING"
 NO_EXPLOIT_EVIDENCE = "NO_EXPLOIT_EVIDENCE"
 
@@ -63,6 +64,7 @@ STATUS_DESCRIPTIONS = {
     TRAFFIC_DETECTED_ONLY: "检测到当前 CVE 攻击流量，但目标侧利用结果未证实",
     TARGET_ORACLE_FAILED: "目标侧 oracle 未验证成功",
     INFRASTRUCTURE_FAILED: "攻击环境、发包服务或验证基础设施失败",
+    EXECUTION_POLICY_BLOCKED: "执行策略阻止发包；请确认 RUN_MODE 和 TARGET_ALLOWLIST",
     AUTH_OR_PRECONDITION_MISSING: "缺少认证、CSRF、版本路径或功能开关等前置条件",
     NO_EXPLOIT_EVIDENCE: "请求完成但没有当前 CVE IPS 命中或目标侧利用证据",
     AI_REPRODUCTION_FAILED: "所有源均已尝试，未能命中当前 CVE 的 IPS 规则",
@@ -81,14 +83,15 @@ STATUS_PRIORITY = {
     NVD_REQUEST_FAILED: 760,
     NVD_NOT_FOUND: 740,
     HTTP2PCAP_SERVICE_FAILED: 700,
+    EXECUTION_POLICY_BLOCKED: 690,
     TARGET_ACCESS_FAILED: 680,
     HTTP_REQUEST_FAILED: 660,
     PCAP_CAPTURE_FAILED: 640,
     TARGET_ORACLE_SUCCESS: 630,
     WEB_SEARCH_FAILED: 620,
+    API_REQUEST_FAILED: 610,
     URL_ACCESS_FAILED: 600,
     POC_SOURCE_ACCESS_FAILED: 580,
-    API_REQUEST_FAILED: 560,
     IPS_GENERIC_MATCH_ONLY: 520,
     TRAFFIC_DETECTED_ONLY: 510,
     AUTH_OR_PRECONDITION_MISSING: 500,
@@ -178,6 +181,9 @@ def classify_error(error: object, *, source: str = "", error_type: str = "") -> 
         if _contains_any(lower, ("capture failed", "pcap capture", "抓包失败", "npcap", "permission")):
             return StatusHint(PCAP_CAPTURE_FAILED, f"PCAP 抓包失败: {error_text}")
         return StatusHint(HTTP2PCAP_SERVICE_FAILED, f"http2pcap 服务调用失败: {error_text}")
+
+    if source_key == "policy" or error_type.strip().lower() == "policy":
+        return StatusHint(EXECUTION_POLICY_BLOCKED, error_text or status_description(EXECUTION_POLICY_BLOCKED))
 
     if "pcap" in lower or "capture" in lower or "抓包" in error_text:
         return StatusHint(PCAP_CAPTURE_FAILED, f"PCAP 抓包失败: {error_text}")

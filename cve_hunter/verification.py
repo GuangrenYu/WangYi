@@ -23,12 +23,14 @@ from cve_hunter.ips_match import classify_ips_matches, summarize_ips_classificat
 from cve_hunter.state import CVEState
 from cve_hunter.status_codes import (
     CAPTURE_SUCCESS,
+    EXECUTION_POLICY_BLOCKED,
     IPS_GENERIC_MATCH_ONLY,
     NO_EXPLOIT_EVIDENCE,
     TARGET_ORACLE_FAILED,
     TARGET_ORACLE_SUCCESS,
     status_description,
 )
+from cve_hunter.safety import evaluate_execution_policy
 from cve_hunter.tools.http_sender import send_poc_and_capture
 
 
@@ -46,6 +48,28 @@ class RequestExecutor:
         environment = environment or {}
         target_url = environment.get("target_url") or _default_target_url()
         target_host = environment.get("target_host") or _target_host_from_url(target_url)
+        policy = evaluate_execution_policy(
+            target_url,
+            target_host,
+            run_mode=getattr(cfg, "run_mode", "plan_only"),
+            allowlist=getattr(cfg, "target_allowlist", []),
+        )
+        if not policy.allowed:
+            return _with_executor_metadata(
+                {
+                    "success": False,
+                    "skipped": True,
+                    "policy_blocked": True,
+                    "error": policy.reason,
+                    "error_type": "policy",
+                    "policy": policy.to_dict(),
+                    "ips_matches": [],
+                },
+                self.name,
+                target_url,
+                target_host,
+                step_results=[],
+            )
 
         if candidate.get("request_steps"):
             return self._execute_steps(candidate["request_steps"], target_url, target_host)
@@ -115,7 +139,13 @@ class SuccessOracle:
         request_success = bool(result.get("success", False))
         target_success = bool(target_oracle.get("success", False))
 
-        if ips_matched:
+        if result.get("policy_blocked"):
+            outcome = "execution_policy_blocked"
+            final_status = "FAILURE"
+            status_code = EXECUTION_POLICY_BLOCKED
+            message = result.get("error") or status_description(EXECUTION_POLICY_BLOCKED)
+            success_level = "not_executed"
+        elif ips_matched:
             outcome = "cve_ips_matched"
             final_status = "SUCCESS"
             status_code = CAPTURE_SUCCESS

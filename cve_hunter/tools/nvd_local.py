@@ -23,6 +23,7 @@ from typing import Any
 import httpx
 
 from cve_hunter.config import cfg
+from cve_hunter.tools.reference_utils import normalize_reference_urls
 
 NVD_FEED_BASE = "https://nvd.nist.gov/feeds/json/cve/2.0"
 
@@ -230,7 +231,7 @@ def _parse_cve_item(cve_id: str, cve_item: dict) -> dict:
     descriptions = cve_item.get("descriptions", [])
     desc_en = next((d["value"] for d in descriptions if d.get("lang") == "en"), "")
 
-    refs = [r.get("url", "") for r in cve_item.get("references", [])]
+    refs = normalize_reference_urls([r.get("url", "") for r in cve_item.get("references", [])])
 
     products = []
     for node in cve_item.get("configurations", []):

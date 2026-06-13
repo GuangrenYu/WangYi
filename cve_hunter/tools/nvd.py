@@ -10,6 +10,7 @@ from email.utils import parsedate_to_datetime
 import httpx
 
 from cve_hunter.config import cfg
+from cve_hunter.tools.reference_utils import normalize_reference_urls
 
 NVD_API = "https://services.nvd.nist.gov/rest/json/cves/2.0"
 
@@ -164,7 +165,7 @@ def _query_nvd_api(cve_id: str) -> dict:
     desc_en = next((d["value"] for d in descriptions if d.get("lang") == "en"), "")
 
     # 提取 References
-    refs = [r.get("url", "") for r in cve_item.get("references", [])]
+    refs = normalize_reference_urls([r.get("url", "") for r in cve_item.get("references", [])])
 
     # 提取受影响产品
     products = []

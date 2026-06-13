@@ -11,10 +11,31 @@ from cve_hunter.config import cfg
 def extract_url_content(url: str) -> dict[str, str]:
     """提取 URL 页面正文内容。
 
-    如果配置了 wayback_url 外部服务则优先调用，否则使用内置 httpx + trafilatura。
+    如果配置了 wayback_url 外部服务则优先调用；外部服务失败时回退到
+    内置 httpx + trafilatura，避免离开实验室网络后 Reference 提取直接中断。
     """
     if cfg.wayback_url:
-        return _extract_via_service(url)
+        service_result = _extract_via_service(url)
+        if service_result.get("content"):
+            return service_result
+
+        builtin_result = _extract_builtin(url)
+        service_error = service_result.get("error", "")
+        builtin_error = builtin_result.get("error", "")
+        if builtin_result.get("content"):
+            if service_error:
+                builtin_result["fallback_from"] = "wayback"
+                builtin_result["service_error"] = service_error
+            return builtin_result
+
+        if service_error and builtin_error:
+            builtin_result["error"] = f"wayback: {service_error}; builtin: {builtin_error}"
+            return builtin_result
+        if service_error:
+            fallback_result = builtin_result or {"url": url, "title": "", "content": ""}
+            fallback_result["error"] = service_error
+            return fallback_result
+        return builtin_result
     return _extract_builtin(url)
 
 

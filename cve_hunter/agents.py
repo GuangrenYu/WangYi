@@ -515,14 +515,49 @@ def _guess_target_url_from_compose(path: Path) -> str:
     if not isinstance(services, dict):
         return ""
 
-    for service in services.values():
+    candidates = []
+    order = 0
+    for service_name, service in services.items():
         if not isinstance(service, dict):
             continue
         for port in service.get("ports") or []:
             published = _published_port(port)
             if published:
-                return f"http://127.0.0.1:{published}"
+                candidates.append((
+                    _compose_port_score(str(service_name), port),
+                    order,
+                    published,
+                ))
+                order += 1
+    if candidates:
+        _, _, published = sorted(candidates)[0]
+        return f"http://127.0.0.1:{published}"
     return ""
+
+
+def _compose_port_score(service_name: str, port: Any) -> int:
+    name = service_name.lower()
+    target_port = _target_port(port)
+    published = _published_port(port)
+    score = 0
+
+    if any(marker in name for marker in (
+        "web", "http", "server", "frontend", "app", "adminer", "gitlab",
+        "geoserver", "aiohttp", "vite", "rails",
+    )):
+        score -= 50
+    if any(marker in name for marker in ("redis", "postgres", "mysql", "mariadb", "db", "database", "mongo", "zookeeper", "kafka")):
+        score += 50
+
+    if target_port in {"80", "8080", "8000", "3000", "5000", "5005", "5173", "5555", "9000"}:
+        score -= 20
+    if published in {"80", "8080", "8000", "3000", "5000", "5005", "5173", "5555", "9000"}:
+        score -= 10
+    if target_port in {"22", "5432", "6379", "3306", "1521", "27017", "9200", "9300"}:
+        score += 40
+    if str(port).lower().endswith("/udp"):
+        score += 20
+    return score
 
 
 def _published_port(port: Any) -> str:
@@ -535,6 +570,17 @@ def _published_port(port: Any) -> str:
         return parts[-2].split("/")[0]
     if isinstance(port, dict):
         value = port.get("published") or port.get("host_port")
+        return str(value) if value else ""
+    return ""
+
+
+def _target_port(port: Any) -> str:
+    if isinstance(port, int):
+        return str(port)
+    if isinstance(port, str):
+        return port.split(":")[-1].split("/")[0]
+    if isinstance(port, dict):
+        value = port.get("target") or port.get("container_port") or port.get("published") or port.get("host_port")
         return str(value) if value else ""
     return ""
 
@@ -565,21 +611,24 @@ def _target_host_from_url(url: str) -> str:
 
 
 def _infer_attack_objective(text: str) -> str:
-    if any(marker in text for marker in ("ssrf", "server-side request forgery", "server side request forgery")):
+    if any(marker in text for marker in ("ssrf", "server-side request forgery", "server side request forgery", "服务端请求伪造")):
         return "outbound_callback"
-    if any(marker in text for marker in ("rce", "remote code", "command injection", "execute arbitrary", "code execution")):
+    if any(marker in text for marker in ("rce", "remote code", "command injection", "execute arbitrary", "code execution", "命令执行", "代码执行", "远程执行")):
         return "command_execution"
-    if any(marker in text for marker in ("sql injection", "sqli", "database")):
+    if any(marker in text for marker in ("sql injection", "sqli", "database", "sql注入", "sql 注入", "数据库")):
         return "database_access"
-    if any(marker in text for marker in ("path traversal", "directory traversal", "file read", "arbitrary file")):
+    if any(marker in text for marker in (
+        "path traversal", "directory traversal", "file read", "arbitrary file",
+        "路径遍历", "目录遍历", "任意文件", "文件读取", "信息泄露", "信息泄漏",
+    )):
         return "file_read"
-    if any(marker in text for marker in ("xss", "cross-site scripting", "cross site scripting")):
+    if any(marker in text for marker in ("xss", "cross-site scripting", "cross site scripting", "跨站脚本")):
         return "browser_script_execution"
-    if any(marker in text for marker in ("csrf", "cross-site request forgery", "cross site request forgery")):
+    if any(marker in text for marker in ("csrf", "cross-site request forgery", "cross site request forgery", "跨站请求伪造")):
         return "state_change"
-    if any(marker in text for marker in ("auth bypass", "authentication bypass", "unauthorized", "privilege escalation")):
+    if any(marker in text for marker in ("auth bypass", "authentication bypass", "unauthorized", "privilege escalation", "认证绕过", "未授权", "权限提升")):
         return "auth_bypass"
-    if any(marker in text for marker in ("denial of service", "redos", "dos", "resource exhaustion")):
+    if any(marker in text for marker in ("denial of service", "redos", "dos", "resource exhaustion", "拒绝服务", "资源耗尽")):
         return "denial_of_service"
     return "traffic_detection"
 

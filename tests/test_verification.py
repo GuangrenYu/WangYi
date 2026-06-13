@@ -1,8 +1,10 @@
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from cve_hunter.state import CVEState
-from cve_hunter.status_codes import CAPTURE_SUCCESS, TARGET_ORACLE_SUCCESS
-from cve_hunter.verification import SuccessOracle, evaluate_target_oracle
+from cve_hunter.status_codes import CAPTURE_SUCCESS, EXECUTION_POLICY_BLOCKED, TARGET_ORACLE_SUCCESS
+from cve_hunter.verification import RequestExecutor, SuccessOracle, evaluate_success, evaluate_target_oracle
 
 
 class VerificationTests(unittest.TestCase):
@@ -49,6 +51,21 @@ class VerificationTests(unittest.TestCase):
         self.assertEqual(oracle["status_code"], TARGET_ORACLE_SUCCESS)
         self.assertEqual(oracle["success_level"], "target_oracle")
         self.assertTrue(oracle["target_oracle"]["success"])
+
+    def test_request_executor_plan_only_blocks_network_execution(self):
+        candidate = {"raw_http": "GET / HTTP/1.1\nHost: {{TARGET_HOST}}\n\n"}
+        environment = {"target_url": "http://127.0.0.1:8080", "target_host": "127.0.0.1:8080"}
+
+        with patch("cve_hunter.verification.cfg", SimpleNamespace(run_mode="plan_only", target_allowlist=[])):
+            result = RequestExecutor().execute(candidate, environment)
+
+        self.assertFalse(result["success"])
+        self.assertTrue(result["policy_blocked"])
+        self.assertEqual(result["error_type"], "policy")
+
+        oracle = evaluate_success(state=CVEState(cve_id="CVE-2024-0003"), candidate=candidate, result=result, environment=environment)
+        self.assertEqual(oracle["status_code"], EXECUTION_POLICY_BLOCKED)
+        self.assertEqual(oracle["success_level"], "not_executed")
 
 
 if __name__ == "__main__":

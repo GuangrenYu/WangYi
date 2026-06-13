@@ -67,13 +67,26 @@ cp .env.example .env
 - `WAYBACK_URL` — 外部 wayback-cve 服务地址
 - `TARGET_IP` — PoC 验证目标 IP
 
+**Docker/Vulhub 自动环境：**
+- `AUTO_ENV_ENABLED=false` — 默认只发现并记录本地 compose 环境，不自动拉镜像或启动容器
+- `AUTO_ENV_ENABLED=true` — 命中 `ATTACK_ENV_COMPOSE_FILE` 或本地 `VULHUB_DIR` 中的 CVE compose 时，执行 `docker compose pull` 和 `docker compose up -d`
+- `VULHUB_DIR=third_party/vulhub` — 本地 vulhub 目录，系统会查找 `**/<CVE-ID>/docker-compose.yml`
+- `ATTACK_ENV_COMPOSE_FILE` — 显式指定 compose 文件时优先使用
+- `ATTACK_ENV_TARGET_URL` — 覆盖从 compose 端口推断出的目标 URL
+
+**执行策略：**
+- `RUN_MODE=plan_only` — 默认值，只规划环境、搜索/生成候选和归档报告，不真实发包
+- `RUN_MODE=local_lab` — 仅允许本地、私有网段或 `TARGET_ALLOWLIST` 命中的目标
+- `RUN_MODE=authorized_target` — 必须命中 `TARGET_ALLOWLIST` 才允许发包
+- `MAX_REQUESTS_PER_CVE` / `MAX_CANDIDATES_PER_CVE` — 单个 CVE 的请求与候选预算
+
 ### 3. 运行
 
 ```bash
 # 命令行模式
 python main.py CVE-2021-44228
 
-# 批量测试模式（从 test 目录选择 txt 文件和测试范围）
+# 批量测试模式（从 data/test_cases 目录选择 txt 文件和测试范围）
 python main.py --batch
 
 # 非交互批量测试：测试 fhq-http.txt 中第 1 到第 20 个 CVE
@@ -104,7 +117,7 @@ python main.py --retry-http-failed --start 2001 --end 5000 --terminals 5
 python main.py
 ```
 
-批量测试会按 `test/*.txt` 中出现的 CVE 编号顺序执行，范围为 1-based 闭区间。批量模式会隐藏单条任务内部的查询、AI 生成和发包过程日志，只在每个 CVE 完成后显示最终结果、进度和正确率；明细会在每条结束后实时写入 `output/batch/`。
+批量测试会按 `data/test_cases/*.txt` 中出现的 CVE 编号顺序执行，范围为 1-based 闭区间。批量模式会隐藏单条任务内部的查询、AI 生成和发包过程日志，只在每个 CVE 完成后显示最终结果、进度和正确率；明细会在每条结束后实时写入 `output/batch/`。
 
 批量测试支持 `--terminals/-t` 自动拆分范围，并通过 VS Code Tasks 在集成终端中并行运行；交互模式下选择测试范围后也会询问启动终端数量，默认 1 个。多终端启动会自动写入 `output/vscode/cve_hunter_launch.code-workspace` 并打开一个 VS Code 自动任务工作区。
 
@@ -161,21 +174,43 @@ PCAP 文件保存在 `output/pcap/` 目录下。
 ├── main.py                        # CLI 入口
 ├── requirements.txt               # Python 依赖
 ├── .env.example                   # 环境变量模板
-├── cve_hunter/
+├── cve_hunter/                    # 核心工作流包
+│   ├── agents.py                  # Trigger/Critic/Environment 等 Agent
 │   ├── config.py                  # 全局配置
-│   ├── state.py                   # LangGraph 状态定义
+│   ├── environment.py             # 攻击环境候选与 manifest
 │   ├── graph.py                   # LangGraph 工作流编排
-│   ├── llm.py                     # LLM 调用封装（支持降级）
-│   ├── prompts/
-│   │   └── templates.py           # Prompt 模板
-│   └── tools/
-│       ├── nvd.py                 # NVD API 查询
-│       ├── poc_sources.py         # PoC 多源检索
-│       ├── web_extract.py         # 网页内容提取
-│       ├── web_search.py          # 联网搜索
-│       └── http_sender.py         # HTTP 发送 + PCAP 抓包
+│   ├── safety.py                  # 运行模式与目标安全策略
+│   ├── state.py                   # LangGraph 状态定义
+│   ├── status_codes.py            # 统一状态码
+│   ├── verification.py            # PoC 验证逻辑
+│   ├── prompts/                   # Prompt 模板
+│   └── tools/                     # NVD、PoC、网页抽取等工具封装
+├── data/
+│   ├── cve/                       # CVE 数据表与本地 PCAP 数据
+│   ├── test_cases/                # 批量测试输入列表
+│   └── 待补充cve.xlsx             # 待补充 CVE 清单
+├── docs/
+│   ├── plans/                     # 计划与优化方向
+│   ├── reports/                   # 项目现状与变更总结
+│   ├── test-plans/                # 测试计划
+│   └── references/                # 本地参考资料，PDF/Zotero 默认忽略
+├── poc_kb/
+│   ├── custom/                    # 自定义 PoC 知识库
+│   └── trickest-cve/              # trickest/cve 子模块
+├── cve_research_tool/             # 独立 CVE 调研辅助工具
+├── tests/                         # 单元测试
+├── third_party/                   # 本地第三方仓库，vulhub 默认忽略
+├── archives/                      # 本地压缩归档，zip 默认忽略
 └── output/                        # 输出目录（运行时生成）
 ```
+
+## 文件整理约定
+
+- 根目录只保留入口、配置模板、依赖清单和 README。
+- 批量输入文件统一放在 `data/test_cases/`；CLI 仍支持通过 `--file fhq-http.txt` 只传文件名。
+- 项目计划、总结和测试计划统一放在 `docs/`；大体积参考资料放在 `docs/references/`，默认不提交 PDF 和 Zotero 导入目录。
+- 本地第三方靶场放在 `third_party/vulhub/`，通过 `VULHUB_DIR` 指定，默认不提交到当前仓库。
+- 运行产物放在 `output/`，压缩归档放在 `archives/`，二者默认不提交大文件。
 
 ## 依赖的外部服务（可选）
 

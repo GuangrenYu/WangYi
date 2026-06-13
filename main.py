@@ -25,8 +25,9 @@ import json
 import re
 import shutil
 import subprocess
+from collections import Counter
 from contextlib import contextmanager, redirect_stderr, redirect_stdout
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from time import perf_counter, sleep, time
@@ -47,7 +48,7 @@ from cve_hunter.status_codes import (
 
 console = Console()
 CVE_PATTERN = re.compile(r"CVE-\d{4}-\d{4,}", re.IGNORECASE)
-TEST_DIR = Path("test")
+TEST_DIR = Path("data/test_cases")
 BATCH_DIR = Path(cfg.output_dir) / "batch"
 VSCODE_TASK_DIR = Path(cfg.output_dir) / "vscode"
 
@@ -68,6 +69,9 @@ class BatchResult:
     ips_match_count: int = 0
     cve_ips_match_count: int = 0
     generic_ips_match_count: int = 0
+    success_level: str = ""
+    milestones: dict = field(default_factory=dict)
+    environment_manifest_path: str = ""
 
 
 @dataclass
@@ -160,14 +164,14 @@ def run_cve(cve_id: str, *, show_details: bool = True, generate_report: bool = T
 
 
 def list_test_files() -> list[Path]:
-    """列出 test 目录下的 txt 测试文件。"""
+    """列出 data/test_cases 目录下的 txt 测试文件。"""
     if not TEST_DIR.exists():
         return []
     return sorted(path for path in TEST_DIR.glob("*.txt") if path.is_file())
 
 
 def resolve_test_file(file_name: str | None) -> Path:
-    """根据输入解析测试文件路径，支持 test 下文件名或完整路径。"""
+    """根据输入解析测试文件路径，支持 data/test_cases 下文件名或完整路径。"""
     if not file_name:
         return choose_test_file()
 
@@ -180,14 +184,14 @@ def resolve_test_file(file_name: str | None) -> Path:
             return path
 
     available = ", ".join(path.name for path in list_test_files()) or "无"
-    raise FileNotFoundError(f"未找到测试文件: {file_name}；test 目录可用文件: {available}")
+    raise FileNotFoundError(f"未找到测试文件: {file_name}；data/test_cases 目录可用文件: {available}")
 
 
 def choose_test_file() -> Path:
-    """交互式选择 test 目录下的 txt 文件。"""
+    """交互式选择 data/test_cases 目录下的 txt 文件。"""
     files = list_test_files()
     if not files:
-        raise FileNotFoundError("test 目录下没有可用的 .txt 文件")
+        raise FileNotFoundError("data/test_cases 目录下没有可用的 .txt 文件")
 
     table = Table(title="可用测试文件")
     table.add_column("序号", justify="right")
@@ -416,6 +420,9 @@ def execute_cve_as_batch_result(index: int, cve_id: str, *, generate_report: boo
         ips_match_count = int(ips_summary.get("total_count") or 0)
         cve_ips_match_count = int(ips_summary.get("cve_match_count") or 0)
         generic_ips_match_count = int(ips_summary.get("generic_match_count") or 0)
+        success_level = final_state.get("success_level", "")
+        milestones = final_state.get("milestones", {}) or {}
+        environment_manifest_path = final_state.get("environment_manifest_path", "")
     except Exception as exc:
         passed = False
         status = "FAILURE"
@@ -428,6 +435,9 @@ def execute_cve_as_batch_result(index: int, cve_id: str, *, generate_report: boo
         ips_match_count = 0
         cve_ips_match_count = 0
         generic_ips_match_count = 0
+        success_level = ""
+        milestones = {}
+        environment_manifest_path = ""
 
     return BatchResult(
         index=index,
@@ -444,6 +454,9 @@ def execute_cve_as_batch_result(index: int, cve_id: str, *, generate_report: boo
         ips_match_count=ips_match_count,
         cve_ips_match_count=cve_ips_match_count,
         generic_ips_match_count=generic_ips_match_count,
+        success_level=success_level,
+        milestones=milestones,
+        environment_manifest_path=environment_manifest_path,
     )
 
 
@@ -1122,6 +1135,11 @@ def run_batch_stats() -> None:
     total_http_passed = 0
     total_http = 0
     total_non_http = 0
+    status_counter: Counter[str] = Counter()
+    source_counter: Counter[str] = Counter()
+    success_level_counter: Counter[str] = Counter()
+    milestone_counter: Counter[str] = Counter()
+    milestone_failed_counter: Counter[str] = Counter()
     skipped_files: list[tuple[Path, str]] = []
 
     console.print(Panel(
@@ -1149,6 +1167,18 @@ def run_batch_stats() -> None:
         http_passed = sum(1 for item in results if item.get("passed") and not is_non_http_result(item))
         accuracy = passed / completed if completed else 0
         http_accuracy = http_passed / http if http else 0
+        for item in results:
+            status_counter[str(item.get("status_code") or "UNKNOWN")] += 1
+            source_counter[str(item.get("poc_source") or "无")] += 1
+            success_level = str(item.get("success_level") or "none")
+            success_level_counter[success_level] += 1
+            milestones = item.get("milestones") or {}
+            if isinstance(milestones, dict):
+                for name, value in milestones.items():
+                    status = str(value.get("status", "unknown")) if isinstance(value, dict) else "unknown"
+                    milestone_counter[f"{name}:{status}"] += 1
+                    if status == "failed":
+                        milestone_failed_counter[name] += 1
 
         total_records += completed
         total_passed += passed
@@ -1200,6 +1230,12 @@ def run_batch_stats() -> None:
         f"排除非HTTP正确率 {total_http_accuracy_text}"
     )
 
+    _print_counter_table("状态码分布", status_counter, "状态码")
+    _print_counter_table("PoC 来源分布", source_counter, "来源")
+    _print_counter_table("Success Level 分布", success_level_counter, "success_level")
+    _print_counter_table("Milestone 失败分布", milestone_failed_counter, "milestone")
+    _print_counter_table("Milestone 状态分布", milestone_counter, "milestone:status", limit=30)
+
     if skipped_files:
         skipped = Table(title="跳过的 JSON 文件")
         skipped.add_column("文件")
@@ -1207,6 +1243,17 @@ def run_batch_stats() -> None:
         for path, reason in skipped_files:
             skipped.add_row(path.name, reason[:120])
         console.print(skipped)
+
+
+def _print_counter_table(title: str, counter: Counter[str], label: str, *, limit: int = 20) -> None:
+    if not counter:
+        return
+    table = Table(title=title)
+    table.add_column(label)
+    table.add_column("数量", justify="right")
+    for key, count in counter.most_common(limit):
+        table.add_row(key, str(count))
+    console.print(table)
 
 
 def run_update_nvd(
@@ -1265,15 +1312,15 @@ def run_update_nvd(
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CVE Hunter 漏洞复现工具")
     parser.add_argument("cve_id", nargs="?", help="单个 CVE 编号；批量/分类模式下也可作为测试文件名")
-    parser.add_argument("--batch", "-b", action="store_true", help="从 test 目录 txt 文件中批量测试 CVE")
+    parser.add_argument("--batch", "-b", action="store_true", help="从 data/test_cases 目录 txt 文件中批量测试 CVE")
     parser.add_argument("--continue", "--resume", dest="continue_mode", action="store_true", help="继续测试：自动减去 output/batch 中已完成的 CVE，执行剩余")
-    parser.add_argument("--classify", action="store_true", help="快速分类 test txt 中的 HTTP/非 HTTP CVE，并输出 *_h.txt/*_f.txt")
+    parser.add_argument("--classify", action="store_true", help="快速分类 data/test_cases txt 中的 HTTP/非 HTTP CVE，并输出 *_h.txt/*_f.txt")
     parser.add_argument("--stats", action="store_true", help="统计 output/batch 下已有 JSON 批量测试记录")
     parser.add_argument("--retry-http-failed", "--retry", action="store_true", help="重跑 output/batch 中 HTTP 失败记录并覆盖原结果")
     parser.add_argument("--retry-mode", choices=("failed", "passed", "all", "status"), default="failed", help="二次核验范围: failed=失败记录, passed=历史通过记录, all=两类都核验, status=按状态码筛选")
     parser.add_argument("--retry-passed", action="store_true", help="等同于 --retry --retry-mode passed，用于正确数据核验")
     parser.add_argument("--status-code", "--status-codes", "--retry-status-code", dest="status_codes", action="append", help="按指定 status_code 重跑；可多次使用或用逗号分隔，如 AI_REPRODUCTION_FAILED,POC_NOT_FOUND")
-    parser.add_argument("--file", "-f", help="批量测试文件名或路径，默认交互选择 test/*.txt")
+    parser.add_argument("--file", "-f", help="批量测试文件名或路径，默认交互选择 data/test_cases/*.txt")
     parser.add_argument("--start", type=int, help="批量测试起始序号，1-based，包含")
     parser.add_argument("--end", type=int, help="批量测试结束序号，1-based，包含")
     parser.add_argument("--terminals", "-t", type=int, help="批量测试/二次核验时自动拆分启动的终端数")

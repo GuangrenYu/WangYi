@@ -4,7 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from cve_hunter.agents import run_critic_agent, run_environment_agent, run_trigger_agent
+from cve_hunter.agents import _guess_target_url_from_compose, run_critic_agent, run_environment_agent, run_trigger_agent
 from cve_hunter.state import CVEState
 
 
@@ -39,6 +39,26 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(result["trace"]["agent"], "EnvironmentAgent")
         self.assertEqual(result["trace"]["status"], "planned")
 
+    def test_compose_target_prefers_web_service_over_redis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            compose = Path(tmp) / "docker-compose.yml"
+            compose.write_text(
+                "services:\n"
+                "  redis:\n"
+                "    image: redis:5-alpine\n"
+                "    ports:\n"
+                "      - \"6379:6379\"\n"
+                "  airflow-webserver:\n"
+                "    image: vulhub/airflow:1.10.10\n"
+                "    ports:\n"
+                "      - \"8080:8080\"\n",
+                encoding="utf-8",
+            )
+
+            target = _guess_target_url_from_compose(compose)
+
+        self.assertEqual(target, "http://127.0.0.1:8080")
+
     def test_trigger_agent_infers_file_read_oracle(self):
         state = CVEState(
             cve_id="CVE-2024-0002",
@@ -53,6 +73,20 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(trigger["attack_objective"], "file_read")
         self.assertEqual(trigger["validation_hint"]["type"], "response_contains")
         self.assertIn("file_path", trigger["variable_slots"])
+
+    def test_trigger_agent_infers_file_read_from_chinese_vuln_type(self):
+        state = CVEState(
+            cve_id="CVE-2018-3760",
+            nvd_description="There is an information leak vulnerability in Sprockets.",
+            vuln_type="路径遍历/信息泄露",
+        )
+
+        with patch("cve_hunter.agents.cfg", SimpleNamespace(agent_llm_enabled=False, callback_url="")):
+            result = run_trigger_agent(state)
+
+        trigger = result["trigger_candidates"][0]
+        self.assertEqual(trigger["attack_objective"], "file_read")
+        self.assertEqual(trigger["validation_hint"]["type"], "response_contains")
 
     def test_critic_agent_enriches_candidate_with_trigger(self):
         trigger = {

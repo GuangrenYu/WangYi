@@ -90,7 +90,8 @@ def search_exploitdb(cve_id: str) -> dict:
                         })
                     return {"found": True, "source": "exploit-db", "results": results}
             except Exception:
-                pass
+                return {"found": False, "source": "exploit-db"}
+            return {"found": False, "source": "exploit-db"}
         if resp.status_code not in (404,):
             return {"found": False, "source": "exploit-db", "error": f"Exploit-DB 请求失败: HTTP {resp.status_code}"}
         return {"found": False, "source": "exploit-db"}

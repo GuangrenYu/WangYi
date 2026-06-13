@@ -1,4 +1,5 @@
 import unittest
+import tempfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -8,10 +9,12 @@ from cve_hunter.graph import (
     _llm_poc_candidates,
     _next_attempt_or_phase_update,
     _raw_http_candidates,
+    node_generate_report,
     node_reflect_after_verify,
     node_verify_poc,
 )
 from cve_hunter.state import CVEState
+from cve_hunter.status_codes import EXECUTION_POLICY_BLOCKED, POC_SOURCE_ACCESS_FAILED
 
 
 def _raw(path: str) -> str:
@@ -30,6 +33,8 @@ class GraphCandidateTests(unittest.TestCase):
         self.assertIn("/first", update["poc_raw_http"])
         self.assertEqual(len(update["poc_payloads"]), 2)
         self.assertEqual(update["current_phase"], "verify_poc")
+        self.assertEqual(update["milestones"]["candidate_collected"]["status"], "passed")
+        self.assertEqual(update["milestones"]["candidate_collected"]["data"]["added_count"], 2)
 
     def test_duplicate_candidate_uses_fallback_phase(self):
         candidates = _raw_http_candidates([_raw("/first")], source="reference")
@@ -265,6 +270,30 @@ class GraphCandidateTests(unittest.TestCase):
 
         self.assertEqual(update["current_phase"], "nuclei_search")
         self.assertEqual(update["reflection_rounds"], 1)
+
+    def test_generate_report_prefers_execution_policy_blocked(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = CVEState(
+                cve_id="CVE-2024-0001",
+                is_http_vuln=True,
+                status_code=POC_SOURCE_ACCESS_FAILED,
+                message="PoC source failed",
+                poc_candidates=_raw_http_candidates([_raw("/first")], source="reference"),
+                poc_raw_http=_raw("/first"),
+                oracle_result={
+                    "status_code": EXECUTION_POLICY_BLOCKED,
+                    "message": "RUN_MODE=plan_only blocks network execution",
+                },
+                executor_result={"policy_blocked": True, "error": "RUN_MODE=plan_only blocks network execution"},
+                attempt_history=[{"outcome": "execution_policy_blocked"}],
+                generate_report=False,
+            )
+
+            with patch("cve_hunter.graph.cfg", SimpleNamespace(output_dir=tmp, run_mode="plan_only", target_allowlist=[])):
+                update = node_generate_report(state)
+
+        self.assertEqual(update["status_code"], EXECUTION_POLICY_BLOCKED)
+        self.assertIn("plan_only", update["message"])
 
 
 if __name__ == "__main__":

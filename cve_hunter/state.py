@@ -40,9 +40,13 @@ class CVEState:
     agent_trace: list[dict[str, Any]] = field(default_factory=list)
     environment_candidates: list[dict[str, Any]] = field(default_factory=list)
     attack_environment: dict[str, Any] = field(default_factory=dict)
+    environment_spec: dict[str, Any] = field(default_factory=dict)
+    environment_manifest_path: str = ""
+    environment_setup_result: dict[str, Any] = field(default_factory=dict)
     trigger_candidates: list[dict[str, Any]] = field(default_factory=list)
     validation_hints: list[dict[str, Any]] = field(default_factory=list)
     candidate_reviews: list[dict[str, Any]] = field(default_factory=list)
+    milestones: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     # ── 验证结果 ──
     http_status_code: int = 0

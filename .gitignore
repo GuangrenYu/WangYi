@@ -12,6 +12,12 @@ build/
 *.pdf
 *.zip
 工具资料/
+archives/
+!archives/
+!archives/README.md
+data/cve/pcaps/
+docs/references/zotero_import/
+third_party/vulhub/
 
 # NVD 本地数据包（大文件，可通过 --update-nvd 重新下载）
 poc_kb/nvd/

@@ -163,7 +163,11 @@ ANALYSIS_REPORT = """\
 
 ## 复现过程
 - PoC 来源: {poc_source}
+- PoC 候选数量: {poc_candidate_count}
+- PoC 候选摘要: {poc_candidate_summary}
+- 当前/最后选中 PoC 预览: {poc_preview}
 - 已尝试阶段: {phases_tried}
+- 执行策略: RUN_MODE={run_mode}, TARGET_ALLOWLIST={target_allowlist}
 - 最终状态: {status}
 - 状态码: {status_code}
 - 错误信息: {error_messages}
@@ -181,4 +185,10 @@ ANALYSIS_REPORT = """\
 3. PoC 详情（如有）
 4. 验证结果
 5. 建议
+
+约束：
+- 如果 PoC 候选数量大于 0，不要写“未获取到任何可用 PoC”；应说明“已生成候选，但未完成执行验证”。
+- RUN_MODE=plan_only 只阻止真实发包/验证，不阻止情报搜索或 PoC 生成。
+- 本工具有效运行模式只有 plan_only、local_lab、authorized_target；不要建议 full_run。
+- 如果状态码是 EXECUTION_POLICY_BLOCKED，失败主因是执行策略阻止，不要归因为 PoC 来源访问失败。
 """

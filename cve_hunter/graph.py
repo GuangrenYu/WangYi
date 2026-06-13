@@ -26,6 +26,7 @@ from langgraph.graph import StateGraph, END
 
 from cve_hunter.classifier import classify_http_vuln_from_info
 from cve_hunter.config import cfg
+from cve_hunter.environment import build_environment_spec, write_environment_manifest
 from cve_hunter.state import CVEState
 from cve_hunter.llm import invoke_llm
 from cve_hunter.agents import (
@@ -50,6 +51,7 @@ from cve_hunter.verification import evaluate_success, execute_candidate
 from cve_hunter.status_codes import (
     AI_REPRODUCTION_FAILED,
     CAPTURE_SUCCESS,
+    EXECUTION_POLICY_BLOCKED,
     INFRASTRUCTURE_FAILED,
     IPS_GENERIC_MATCH_ONLY,
     NOT_HTTP_VULN,
@@ -63,6 +65,37 @@ from cve_hunter.status_codes import (
 from rich.console import Console
 
 console = Console()
+
+
+def _mark_milestone_map(
+    milestones: dict,
+    name: str,
+    status: str,
+    *,
+    message: str = "",
+    data: dict | None = None,
+) -> dict:
+    updated = deepcopy(milestones or {})
+    previous = updated.get(name, {})
+    updated[name] = {
+        "status": status,
+        "message": message,
+        "data": data or {},
+        "count": int(previous.get("count") or 0) + 1 if isinstance(previous, dict) else 1,
+        "timestamp": datetime.now().isoformat(),
+    }
+    return updated
+
+
+def _milestone_update(
+    state: CVEState,
+    name: str,
+    status: str,
+    *,
+    message: str = "",
+    data: dict | None = None,
+) -> dict:
+    return {"milestones": _mark_milestone_map(state.milestones, name, status, message=message, data=data)}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -79,8 +112,19 @@ def node_validate_input(state: CVEState) -> dict:
             "status": "FAILURE",
             "status_code": PARAMETER_ERROR,
             "message": f"CVE 编号格式错误: {state.cve_id}",
+            **_milestone_update(
+                state,
+                "input_validated",
+                "failed",
+                message="CVE 编号格式错误",
+                data={"input": state.cve_id},
+            ),
         }
-    return {"cve_id": cve_id, "current_phase": "nvd_query"}
+    return {
+        "cve_id": cve_id,
+        "current_phase": "nvd_query",
+        **_milestone_update(state, "input_validated", "passed", data={"cve_id": cve_id}),
+    }
 
 
 def node_query_nvd(state: CVEState) -> dict:
@@ -95,6 +139,13 @@ def node_query_nvd(state: CVEState) -> dict:
                 "nvd_description": "",
                 **make_status_update(state.status_code, hint.code, hint.message),
                 "current_phase": "vuln_type_check",
+                **_milestone_update(
+                    state,
+                    "nvd_loaded",
+                    "failed",
+                    message=hint.message,
+                    data={"status_code": hint.code},
+                ),
             }
         console.print(f"  [green]✓[/] CVSS={info['cvss_score']} refs={len(info['references'])}")
         return {
@@ -104,6 +155,16 @@ def node_query_nvd(state: CVEState) -> dict:
             "cvss_score": info["cvss_score"],
             "cvss_severity": info["cvss_severity"],
             "current_phase": "vuln_type_check",
+            **_milestone_update(
+                state,
+                "nvd_loaded",
+                "passed",
+                data={
+                    "cvss_score": info["cvss_score"],
+                    "cvss_severity": info["cvss_severity"],
+                    "reference_count": len(info["references"]),
+                },
+            ),
         }
     except Exception as e:
         hint = classify_error(e, source="nvd")
@@ -112,6 +173,13 @@ def node_query_nvd(state: CVEState) -> dict:
             "error_messages": state.error_messages + [f"NVD 查询失败: {e}"],
             **make_status_update(state.status_code, hint.code, hint.message),
             "current_phase": "vuln_type_check",
+            **_milestone_update(
+                state,
+                "nvd_loaded",
+                "failed",
+                message=hint.message,
+                data={"status_code": hint.code},
+            ),
         }
 
 
@@ -121,7 +189,18 @@ def node_vuln_type_check(state: CVEState) -> dict:
 
     if not state.nvd_description:
         console.print("  [yellow]⚠ 无 NVD 描述，默认为 HTTP 漏洞继续处理[/]")
-        return {"is_http_vuln": True, "vuln_type": "未知", "current_phase": "environment_agent"}
+        return {
+            "is_http_vuln": True,
+            "vuln_type": "未知",
+            "current_phase": "environment_agent",
+            **_milestone_update(
+                state,
+                "http_classified",
+                "passed",
+                message="无 NVD 描述，按 HTTP/Web 继续",
+                data={"is_http_vuln": True, "vuln_type": "未知"},
+            ),
+        }
 
     result = classify_http_vuln_from_info(
         cve_id=state.cve_id,
@@ -143,12 +222,25 @@ def node_vuln_type_check(state: CVEState) -> dict:
             hint = classify_error(result.error, source="llm")
             updates.update(make_status_update(state.status_code, hint.code, hint.message))
         console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type}")
+        updates["milestones"] = _mark_milestone_map(
+            state.milestones,
+            "http_classified",
+            "failed" if "AI 判断" in result.error else "passed",
+            message=result.error,
+            data={"is_http_vuln": result.is_http_vuln, "vuln_type": result.vuln_type},
+        )
         return updates
     console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type}")
     return {
         "is_http_vuln": result.is_http_vuln,
         "vuln_type": result.vuln_type,
         "current_phase": "environment_agent",
+        **_milestone_update(
+            state,
+            "http_classified",
+            "passed",
+            data={"is_http_vuln": result.is_http_vuln, "vuln_type": result.vuln_type},
+        ),
     }
 
 
@@ -157,17 +249,71 @@ def node_environment_agent(state: CVEState) -> dict:
     console.print("[bold cyan]▶ EnvironmentAgent 攻击环境规划[/]")
     result = run_environment_agent(state)
     trace = result["trace"]
+    env = result["attack_environment"]
+    environment_spec = build_environment_spec(
+        cve_id=state.cve_id,
+        environment=env,
+        candidates=result["environment_candidates"],
+        run_mode=getattr(cfg, "run_mode", "plan_only"),
+        allowlist=getattr(cfg, "target_allowlist", []),
+        evidence_urls=state.nvd_references[:8],
+    )
+    manifest_path = ""
+    manifest_error = ""
+    try:
+        manifest_path = str(write_environment_manifest(environment_spec, Path(cfg.output_dir) / state.cve_id))
+    except Exception as exc:
+        manifest_error = f"环境 manifest 写入失败: {exc}"
+
+    milestone_status = "failed" if trace.get("status") in {"setup_failed", "not_found"} else "passed"
+    milestone_message = trace.get("summary", "")
+    milestones = _mark_milestone_map(
+        state.milestones,
+        "environment_planned",
+        milestone_status,
+        message=milestone_message,
+        data={
+            "source": env.get("source", ""),
+            "target_url": env.get("target_url", ""),
+            "candidate_count": len(result["environment_candidates"]),
+            "manifest_path": manifest_path,
+        },
+    )
+    setup_result = env.get("setup_result") if isinstance(env.get("setup_result"), dict) else {}
+    if setup_result:
+        milestones = _mark_milestone_map(
+            milestones,
+            "environment_ready",
+            "passed" if setup_result.get("success") else "failed",
+            message=setup_result.get("error", "") or "compose setup completed",
+            data={"setup_result": setup_result},
+        )
+    else:
+        milestones = _mark_milestone_map(
+            milestones,
+            "environment_ready",
+            "skipped",
+            message=env.get("setup_mode", "") or "environment setup not required",
+            data={"setup_mode": env.get("setup_mode", "")},
+        )
+
     updates = {
         "environment_candidates": result["environment_candidates"],
-        "attack_environment": result["attack_environment"],
+        "attack_environment": env,
+        "environment_spec": environment_spec,
+        "environment_manifest_path": manifest_path,
+        "environment_setup_result": env.get("setup_result", {}),
         "agent_trace": append_agent_trace(state, **trace),
         "current_phase": "local_kb_search",
+        "milestones": milestones,
     }
-    if result.get("errors"):
-        updates["error_messages"] = state.error_messages + result["errors"]
+    errors = list(result.get("errors") or [])
+    if manifest_error:
+        errors.append(manifest_error)
+    if errors:
+        updates["error_messages"] = state.error_messages + errors
         if cfg.auto_env_enabled:
-            updates.update(make_status_update(state.status_code, INFRASTRUCTURE_FAILED, result["errors"][0]))
-    env = result["attack_environment"]
+            updates.update(make_status_update(state.status_code, INFRASTRUCTURE_FAILED, errors[0]))
     console.print(f"  [green]✓[/] target={env.get('target_url', '')} source={env.get('source', '')}")
     return updates
 
@@ -581,20 +727,55 @@ def node_verify_poc(state: CVEState) -> dict:
     candidate = critic["candidate"]
     agent_trace = append_agent_trace(state, **critic["trace"])
     candidate_update = _replace_current_candidate_update(state, candidate)
+    review = critic["review"]
+    milestones = _mark_milestone_map(
+        state.milestones,
+        "candidate_reviewed",
+        "passed" if review.get("accepted") else "failed",
+        message="候选审查完成",
+        data={
+            "candidate_index": state.current_candidate_index,
+            "source": candidate.get("source", ""),
+            "flags": review.get("flags", []),
+            "confidence_after": review.get("confidence_after", candidate.get("confidence", 0.0)),
+        },
+    )
 
     if not candidate.get("raw_http") and not candidate.get("nuclei_yaml") and not candidate.get("request_steps"):
+        milestones = _mark_milestone_map(
+            milestones,
+            "request_executed",
+            "skipped",
+            message="候选缺少可执行 payload",
+            data={"candidate_index": state.current_candidate_index},
+        )
         return {
             "candidate_reviews": state.candidate_reviews + [critic["review"]],
             "agent_trace": agent_trace,
             **candidate_update,
+            "milestones": milestones,
             **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
             **_next_attempt_or_phase_update(state),
         }
 
     environment = state.attack_environment or {}
     target = environment.get("target_host") or cfg.target_ip
-    console.print(f"  发送候选到 {target}...")
-    result = execute_candidate(candidate, environment)
+    console.print(f"  准备验证候选，目标 {target}...")
+    max_requests = int(getattr(cfg, "max_requests_per_cve", 20) or 0)
+    if max_requests > 0 and len(state.attempt_history) >= max_requests:
+        result = {
+            "success": False,
+            "skipped": True,
+            "policy_blocked": True,
+            "error": f"MAX_REQUESTS_PER_CVE={max_requests} budget exhausted",
+            "error_type": "policy",
+            "executor": "policy_guard",
+            "target_url": environment.get("target_url", ""),
+            "target_host": target,
+            "ips_matches": [],
+        }
+    else:
+        result = execute_candidate(candidate, environment)
     oracle = evaluate_success(state=state, candidate=candidate, result=result, environment=environment)
 
     success = result.get("success", False)
@@ -603,6 +784,35 @@ def node_verify_poc(state: CVEState) -> dict:
     ips_matched = oracle["ips_matched"]
     generic_ips_matched = oracle["generic_ips_matched"]
     target_oracle = oracle["target_oracle"]
+    request_status = "skipped" if result.get("policy_blocked") or result.get("skipped") else ("passed" if success else "failed")
+    milestones = _mark_milestone_map(
+        milestones,
+        "request_executed",
+        request_status,
+        message=result.get("error", "") if request_status != "passed" else "request executed",
+        data={
+            "candidate_index": state.current_candidate_index,
+            "executor": result.get("executor", ""),
+            "target_url": result.get("target_url", ""),
+            "target_host": result.get("target_host", ""),
+            "http_status_code": result.get("status_code", 0),
+        },
+    )
+    milestones = _mark_milestone_map(
+        milestones,
+        "oracle_evaluated",
+        "passed",
+        message=oracle["message"],
+        data={"outcome": oracle["outcome"], "success_level": oracle["success_level"]},
+    )
+    confirm_status = "passed" if ips_matched or target_oracle.get("success") else ("skipped" if result.get("policy_blocked") else "failed")
+    milestones = _mark_milestone_map(
+        milestones,
+        "cve_confirmed",
+        confirm_status,
+        message=oracle["message"],
+        data={"outcome": oracle["outcome"], "success_level": oracle["success_level"]},
+    )
 
     updates = {
         "candidate_reviews": state.candidate_reviews + [critic["review"]],
@@ -634,6 +844,7 @@ def node_verify_poc(state: CVEState) -> dict:
         "target_oracle_type": target_oracle.get("type", ""),
         "target_oracle_details": target_oracle,
         "success_level": oracle["success_level"],
+        "milestones": milestones,
     }
 
     if ips_matched:
@@ -688,7 +899,7 @@ def node_verify_poc(state: CVEState) -> dict:
         )
         updates.update(_next_attempt_or_phase_update(state, allow_reflection=True))
     else:
-        verify_source = "http2pcap" if cfg.http2pcap_url else "target"
+        verify_source = "policy" if result.get("policy_blocked") else ("http2pcap" if cfg.http2pcap_url else "target")
         hint = classify_error(result.get("error", "未知错误"), source=verify_source, error_type=result.get("error_type", ""))
         console.print(f"  [red]✗ 请求失败:[/] {result.get('error', '未知错误')}")
         updates["error_messages"] = state.error_messages + [result.get("error", "")]
@@ -716,6 +927,17 @@ def node_trigger_agent(state: CVEState) -> dict:
         "validation_hints": result["validation_hints"],
         "agent_trace": append_agent_trace(state, **result["trace"]),
         "current_phase": "poc_from_refs",
+        **_milestone_update(
+            state,
+            "trigger_modeled",
+            "passed" if result["trigger_candidates"] else "failed",
+            message=result["trace"].get("summary", ""),
+            data={
+                "candidate_count": len(result["trigger_candidates"]),
+                "attack_objective": trigger.get("attack_objective", ""),
+                "validation_hint": trigger.get("validation_hint", {}),
+            },
+        ),
     }
 
 
@@ -824,6 +1046,9 @@ def node_generate_report(state: CVEState) -> dict:
         elif state.generic_ips_matched:
             final_code = IPS_GENERIC_MATCH_ONLY
             final_msg = "检测到通用 IPS 命中，但日志 CVE 字段未匹配当前 CVE"
+        elif _execution_policy_blocked(state):
+            final_code = EXECUTION_POLICY_BLOCKED
+            final_msg = state.oracle_result.get("message") or state.executor_result.get("error") or status_description(EXECUTION_POLICY_BLOCKED)
         elif state.status_code:
             final_code = state.status_code
             final_msg = state.message or status_description(final_code)
@@ -835,6 +1060,8 @@ def node_generate_report(state: CVEState) -> dict:
         final_code = state.status_code
         final_msg = state.message
 
+    final_msg = _augment_final_message(state, final_status, final_msg)
+
     prompt = ANALYSIS_REPORT.format(
         cve_id=state.cve_id,
         description=state.nvd_description or "无",
@@ -843,6 +1070,11 @@ def node_generate_report(state: CVEState) -> dict:
         affected_products=", ".join(state.affected_products[:5]) or "无",
         vuln_type=state.vuln_type or "未知",
         poc_source=state.poc_source or "无",
+        poc_candidate_count=len(state.poc_candidates),
+        poc_candidate_summary=_poc_candidate_summary(state),
+        poc_preview=_poc_preview(state),
+        run_mode=getattr(cfg, "run_mode", "plan_only"),
+        target_allowlist=", ".join(getattr(cfg, "target_allowlist", [])) or "无",
         phases_tried=", ".join(state.phases_tried) or "无",
         status=final_status,
         status_code=final_code,
@@ -887,9 +1119,13 @@ def node_generate_report(state: CVEState) -> dict:
         "agent_trace": state.agent_trace,
         "environment_candidates": state.environment_candidates,
         "attack_environment": state.attack_environment,
+        "environment_spec": state.environment_spec,
+        "environment_manifest_path": state.environment_manifest_path,
+        "environment_setup_result": state.environment_setup_result,
         "trigger_candidates": state.trigger_candidates,
         "validation_hints": state.validation_hints,
         "candidate_reviews": state.candidate_reviews,
+        "milestones": state.milestones,
         "executor_result": state.executor_result,
         "oracle_result": state.oracle_result,
         "target_oracle_success": state.target_oracle_success,
@@ -984,7 +1220,32 @@ def _candidate_update(state: CVEState, candidates: list[dict], *, fallback_phase
     """追加候选并选择第一个新增候选作为当前验证对象。"""
     unique_candidates = _dedupe_new_candidates(state.poc_candidates, candidates)
     if not unique_candidates:
-        return {"current_phase": fallback_phase} if fallback_phase else {}
+        updates = _milestone_update(
+            state,
+            "candidate_collected",
+            "skipped",
+            message="未收集到新的可执行候选",
+            data={"incoming_count": len(candidates), "existing_count": len(state.poc_candidates)},
+        )
+        if fallback_phase:
+            updates["current_phase"] = fallback_phase
+        return updates
+
+    max_candidates = int(getattr(cfg, "max_candidates_per_cve", 50) or 0)
+    if max_candidates > 0:
+        remaining = max_candidates - len(state.poc_candidates)
+        if remaining <= 0:
+            updates = _milestone_update(
+                state,
+                "candidate_collected",
+                "skipped",
+                message=f"候选数量已达到 MAX_CANDIDATES_PER_CVE={max_candidates}",
+                data={"max_candidates": max_candidates},
+            )
+            if fallback_phase:
+                updates["current_phase"] = fallback_phase
+            return updates
+        unique_candidates = unique_candidates[:remaining]
 
     all_candidates = state.poc_candidates + unique_candidates
     selected_index = len(state.poc_candidates)
@@ -994,6 +1255,16 @@ def _candidate_update(state: CVEState, candidates: list[dict], *, fallback_phase
         "poc_candidates": all_candidates,
         "poc_payloads": state.poc_payloads + raw_payloads,
         "current_phase": "verify_poc",
+        **_milestone_update(
+            state,
+            "candidate_collected",
+            "passed",
+            data={
+                "added_count": len(unique_candidates),
+                "total_count": len(all_candidates),
+                "sources": sorted({str(candidate.get("source", "")) for candidate in unique_candidates}),
+            },
+        ),
         **_select_candidate_update(all_candidates[selected_index], selected_index),
     }
 
@@ -1008,6 +1279,58 @@ def _dedupe_new_candidates(existing_candidates: list[dict], candidates: list[dic
         seen.add(key)
         unique.append(candidate)
     return unique
+
+
+def _augment_final_message(state: CVEState, final_status: str, message: str) -> str:
+    """Add concise workflow context to the terminal failure message."""
+    if final_status == "SUCCESS":
+        return message
+
+    clauses = [message or status_description(state.status_code)]
+    if not state.poc_candidates and not state.poc_raw_http and not state.poc_nuclei_yaml:
+        clauses.append("未生成 PoC 候选")
+
+    if state.error_messages:
+        recent = "; ".join(state.error_messages[-2:])
+        if recent and recent not in clauses[0]:
+            clauses.append(f"最近错误: {recent}")
+
+    return "；".join(clause for clause in clauses if clause)
+
+
+def _execution_policy_blocked(state: CVEState) -> bool:
+    if state.oracle_result.get("status_code") == EXECUTION_POLICY_BLOCKED:
+        return True
+    if state.executor_result.get("policy_blocked"):
+        return True
+    if state.attempt_history and all(item.get("outcome") == "execution_policy_blocked" for item in state.attempt_history):
+        return True
+    return False
+
+
+def _poc_candidate_summary(state: CVEState) -> str:
+    if not state.poc_candidates:
+        return "无"
+
+    summary: dict[str, dict[str, int]] = {}
+    for candidate in state.poc_candidates:
+        source = candidate.get("source", "unknown")
+        kind = candidate.get("kind", "unknown")
+        source_summary = summary.setdefault(source, {"total": 0})
+        source_summary["total"] += 1
+        source_summary[kind] = source_summary.get(kind, 0) + 1
+    return json.dumps(summary, ensure_ascii=False)
+
+
+def _poc_preview(state: CVEState) -> str:
+    if state.poc_raw_http:
+        return state.poc_raw_http[:2000]
+    if state.poc_nuclei_yaml:
+        return state.poc_nuclei_yaml[:2000]
+    candidate = _current_candidate(state)
+    if candidate:
+        return (candidate.get("raw_http") or candidate.get("nuclei_yaml") or "")[:2000] or "无"
+    return "无"
 
 
 def _candidate_key(candidate: dict) -> str:

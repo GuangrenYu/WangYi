@@ -70,12 +70,13 @@ def search_local_kb(cve_id: str) -> dict:
         if parsed.get("github_repos"):
             # 尝试从关联 GitHub 仓库获取 PoC
             poc = _fetch_poc_from_github_repos(parsed["github_repos"], cve_id)
-            if poc:
+            if poc and (poc.get("raw_http") or poc.get("yaml_content")):
                 return {
                     "found": True,
                     "source": "local_kb_trickest",
                     "kb_path": str(trickest_file),
-                    "raw_http": poc,
+                    "raw_http": poc.get("raw_http", ""),
+                    "yaml_content": poc.get("yaml_content", ""),
                     "github_repos": parsed["github_repos"],
                     "references": parsed.get("references", []),
                 }
@@ -153,64 +154,157 @@ def _parse_trickest_md(content: str, cve_id: str) -> dict:
 
 # ── GitHub PoC 抓取 ──
 
-def _fetch_poc_from_github_repos(repos: list[dict], cve_id: str) -> str | None:
+def _fetch_poc_from_github_repos(repos: list[dict], cve_id: str) -> dict[str, str] | None:
     """从 trickest 关联的 GitHub 仓库中尝试获取原始 PoC 代码。
 
-    采样前 5 个仓库的 raw/README/blob 内容，提取 HTTP 请求。
+    优先采样 CVE 专属仓库和 PoC/Exploit 仓库的 raw/README 内容，提取
+    Raw HTTP 请求；若只有 nuclei 模板则返回 YAML 候选。
     """
     if not repos:
         return None
 
     candidates = []
-    for repo in repos[:5]:
+    for repo in _prioritize_github_repos(repos, cve_id)[:12]:
         url = repo["url"]
-        # 尝试获取仓库的 README 或 exploit 文件
-        raw_urls = _guess_raw_urls(url)
+        raw_urls = _guess_raw_urls(url, cve_id)
         candidates.extend(raw_urls)
 
     if not candidates:
         return None
 
+    yaml_candidate = ""
     with httpx.Client(timeout=cfg.request_timeout, proxy=cfg.httpx_proxy) as client:
-        for raw_url in candidates[:8]:
+        for raw_url in _dedupe_strings(candidates)[:120]:
             try:
                 resp = client.get(raw_url, follow_redirects=True)
                 if resp.status_code == 200 and len(resp.text) > 100:
                     pocs = _extract_http_requests(resp.text, cve_id)
                     if pocs:
-                        return pocs[0]
+                        return {"raw_http": pocs[0], "yaml_content": ""}
+                    if not yaml_candidate:
+                        yaml_candidate = _extract_nuclei_yaml(resp.text, cve_id)
             except Exception:
                 continue
             time.sleep(0.3)  # 避免触发 GitHub rate limit
 
+    if yaml_candidate:
+        return {"raw_http": "", "yaml_content": yaml_candidate}
     return None
 
 
-def _guess_raw_urls(github_url: str) -> list[str]:
+def _guess_raw_urls(github_url: str, cve_id: str = "") -> list[str]:
     """根据 GitHub 仓库 URL 猜测可能的 raw 文件路径。"""
-    # 标准化：去掉末尾 /
-    url = github_url.rstrip("/")
-    # 转换为 raw URL 前缀
-    raw_base = url.replace("https://github.com", "https://raw.githubusercontent.com") + "/master"
-    alt_base = url.replace("https://github.com", "https://raw.githubusercontent.com") + "/main"
+    file_url = _raw_file_url(github_url)
+    if file_url:
+        return [file_url]
+
+    url = _github_repo_root(github_url)
+    if not url:
+        return []
+
+    repo_name = url.rstrip("/").split("/")[-1]
+    cve_match = re.search(r"CVE-\d{4}-\d+", github_url, re.IGNORECASE)
+    cve_slug = (cve_match.group(0) if cve_match else cve_id).upper()
+    cve_lower = cve_slug.lower()
 
     candidates = []
-    paths = [
-        "exploit.py", "poc.py", "exploit.sh", "poc.sh",
-        "CVE-{}.py", "CVE-{}.sh", "README.md", "exploit.txt",
-        "poc.txt", "poc.http", "exploit.http",
-    ]
-    for base in (raw_base, alt_base):
-        for p in paths:
-            candidates.append(f"{base}/{p}")
-        candidates.append(base.replace("/raw.githubusercontent.com/", "/api.github.com/repos/") + "/readme")
+    paths = _candidate_repo_paths(cve_slug, cve_lower, repo_name)
+    raw_base = url.replace("https://github.com", "https://raw.githubusercontent.com")
+    for branch in ("master", "main"):
+        for path in paths:
+            candidates.append(f"{raw_base}/{branch}/{path}")
+    return candidates
 
-    return candidates[:10]
+
+def _candidate_repo_paths(cve_slug: str, cve_lower: str, repo_name: str) -> list[str]:
+    paths = [
+        "README.md", "README.txt", "README.rst",
+        "poc.py", "exploit.py", "exp.py", "poc.rb", "exploit.rb",
+        "poc.sh", "exploit.sh", "poc.txt", "exploit.txt",
+        "poc.http", "exploit.http", "request.http",
+        "poc.yaml", "poc.yml", "template.yaml", "template.yml", "nuclei.yaml", "nuclei.yml",
+    ]
+    if cve_slug:
+        paths = [
+            f"{cve_slug}.md", f"{cve_slug}.py", f"{cve_slug}.rb", f"{cve_slug}.txt",
+            f"{cve_slug}.yaml", f"{cve_slug}.yml", f"{cve_slug}.http",
+            f"{cve_lower}.md", f"{cve_lower}.py", f"{cve_lower}.txt",
+            f"{cve_lower}.yaml", f"{cve_lower}.yml", f"{cve_lower}.http",
+            *paths,
+        ]
+    if repo_name:
+        paths.extend([f"{repo_name}.md", f"{repo_name}.py", f"{repo_name}.txt"])
+    return _dedupe_strings(paths)
+
+
+def _github_repo_root(github_url: str) -> str:
+    m = re.match(r"https?://github\.com/([^/\s]+)/([^/\s#?]+)", github_url.rstrip("/"))
+    if not m:
+        return ""
+    owner, repo = m.group(1), m.group(2).removesuffix(".git")
+    return f"https://github.com/{owner}/{repo}"
+
+
+def _raw_file_url(github_url: str) -> str:
+    m = re.match(
+        r"https?://github\.com/([^/\s]+)/([^/\s]+)/blob/([^/\s]+)/(.+)",
+        github_url.rstrip("/"),
+    )
+    if not m:
+        return ""
+    owner, repo, branch, path = m.groups()
+    return f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}"
+
+
+def _prioritize_github_repos(repos: list[dict], cve_id: str) -> list[dict]:
+    cve_lower = cve_id.lower()
+
+    def sort_key(item: tuple[int, dict]) -> tuple[int, int]:
+        index, repo = item
+        text = f"{repo.get('label', '')} {repo.get('url', '')}".lower()
+        score = 0
+        if cve_lower in text:
+            score -= 100
+        if any(marker in text for marker in ("poc", "exploit", "vulhub", "reproduce")):
+            score -= 25
+        if "nuclei" in text:
+            score -= 10
+        if any(marker in text for marker in ("awesome", "bookmark", "bookmarks", "cvemon")):
+            score += 20
+        return score, index
+
+    return [repo for _, repo in sorted(enumerate(repos), key=sort_key)]
 
 
 def _extract_http_requests(text: str, cve_id: str) -> list[str]:
     """从文本中提取 HTTP 请求。"""
     return extract_http_requests(text)
+
+
+def _extract_nuclei_yaml(text: str, cve_id: str) -> str:
+    """从文本或 markdown 代码块中提取当前 CVE 的 nuclei YAML。"""
+    blocks = re.findall(r"```(?:yaml|yml)?\s*\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
+    candidates = blocks or [text]
+    for candidate in candidates:
+        content = candidate.strip()
+        if not content or "id:" not in content[:500].lower():
+            continue
+        if cve_id.lower() not in content.lower():
+            continue
+        if "requests:" in content or "http:" in content:
+            return content
+    return ""
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen = set()
+    unique = []
+    for value in values:
+        if not value or value in seen:
+            continue
+        seen.add(value)
+        unique.append(value)
+    return unique
 
 
 # ── 保存 ──

@@ -19,6 +19,18 @@ def _get_proxy() -> str:
     )
 
 
+def _csv_env(name: str) -> list[str]:
+    value = os.getenv(name, "")
+    return [item.strip() for item in value.replace("，", ",").split(",") if item.strip()]
+
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(os.getenv(name, str(default)))
+    except (TypeError, ValueError):
+        return default
+
+
 @dataclass(frozen=True)
 class Config:
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
@@ -62,13 +74,20 @@ class Config:
         default_factory=lambda: os.getenv("AUTO_ENV_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     )
     # 本地 vulhub 目录；若存在 **/<CVE-ID>/docker-compose.yml，可自动规划/启动
-    vulhub_dir: str = field(default_factory=lambda: os.getenv("VULHUB_DIR", "vulhub"))
+    vulhub_dir: str = field(default_factory=lambda: os.getenv("VULHUB_DIR", "third_party/vulhub"))
     # 显式指定 docker-compose 文件时优先使用
     attack_env_compose_file: str = field(default_factory=lambda: os.getenv("ATTACK_ENV_COMPOSE_FILE", ""))
     # 自动环境目标 URL；不配置时从 compose 端口映射猜测，猜不到则回退 TARGET_IP
     attack_env_target_url: str = field(default_factory=lambda: os.getenv("ATTACK_ENV_TARGET_URL", ""))
     # SSRF/RCE 等目标侧 oracle 可使用的回连地址
     callback_url: str = field(default_factory=lambda: os.getenv("CALLBACK_URL", ""))
+
+    # 执行策略：默认只规划不发包。local_lab 仅允许本地/私有地址或 allowlist；
+    # authorized_target 必须命中 allowlist。
+    run_mode: str = field(default_factory=lambda: os.getenv("RUN_MODE", "plan_only").strip().lower())
+    target_allowlist: list[str] = field(default_factory=lambda: _csv_env("TARGET_ALLOWLIST"))
+    max_requests_per_cve: int = field(default_factory=lambda: _int_env("MAX_REQUESTS_PER_CVE", 20))
+    max_candidates_per_cve: int = field(default_factory=lambda: _int_env("MAX_CANDIDATES_PER_CVE", 50))
 
     # HTTP/HTTPS 代理
     proxy: str = field(default_factory=_get_proxy)
