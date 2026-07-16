@@ -12,6 +12,7 @@ class CVEState:
 
     # ── 输入 ──
     cve_id: str = ""
+    local_container_mode: bool = False
 
     # ── NVD 信息 ──
     nvd_description: str = ""
@@ -33,8 +34,6 @@ class CVEState:
     poc_candidates: list[dict[str, Any]] = field(default_factory=list)
     current_candidate_index: int = 0
     attempt_history: list[dict[str, Any]] = field(default_factory=list)
-    reflection_rounds: int = 0
-    max_reflection_rounds: int = 2
 
     # ── Agent 中间产物 ──
     agent_trace: list[dict[str, Any]] = field(default_factory=list)

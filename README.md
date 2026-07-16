@@ -63,6 +63,7 @@ cp .env.example .env
 - `NVD_API_KEY` — 提升 NVD API 查询配额
 - `TAVILY_API_KEY` — Tavily 搜索（不填则用 DuckDuckGo 备用）
 - `HTTP2PCAP_URL` — 外部 http2pcap 服务地址
+- `PCAP_OUTPUT_DIR` — 测试抓包归档根目录，默认 `data/cve/pcaps`，按 `YYYY-MM-DD` 分目录
 - `IPS_API_URL` — 防火墙/IPS 检测接口地址（http2pcap 服务启用 `check_ips` 时使用）
 - `WAYBACK_URL` — 外部 wayback-cve 服务地址
 - `TARGET_IP` — PoC 验证目标 IP
@@ -71,6 +72,7 @@ cp .env.example .env
 - `AUTO_ENV_ENABLED=false` — 默认只发现并记录本地 compose 环境，不自动拉镜像或启动容器
 - `AUTO_ENV_ENABLED=true` — 命中 `ATTACK_ENV_COMPOSE_FILE` 或本地 `VULHUB_DIR` 中的 CVE compose 时，执行 `docker compose pull` 和 `docker compose up -d`
 - `VULHUB_DIR=third_party/vulhub` — 本地 vulhub 目录，系统会查找 `**/<CVE-ID>/docker-compose.yml`
+- 本地模式发现 `VULHUB_DIR` 不存在时，会自动浅克隆 Vulhub；命中 compose 后自动拉取镜像并启动
 - `ATTACK_ENV_COMPOSE_FILE` — 显式指定 compose 文件时优先使用
 - `ATTACK_ENV_TARGET_URL` — 覆盖从 compose 端口推断出的目标 URL
 
@@ -95,6 +97,15 @@ python main.py --batch --file fhq-http.txt --start 1 --end 20
 # 多开 VS Code 集成终端批量测试：把第 1 到第 100 个 CVE 拆成 5 个终端执行
 python main.py --batch --file fhq-http.txt --start 1 --end 100 --terminals 5
 
+# 仅使用本地 Docker/Vulhub；环境不可用时当前 CVE 直接失败，不回退 TARGET_IP
+python main.py CVE-2024-23334 --local-container
+
+# 本地容器批量测试（同样支持 --terminals）
+python main.py --batch --file fhq-http.txt --start 1 --end 100 --terminals 5 --local-container
+
+# 继续尚未完成的本地容器批量测试
+python main.py --continue --file fhq-http.txt --terminals 5 --local-container
+
 # 分类筛选：只做 HTTP/非 HTTP 判断，输出 fhq-http_h.txt 和 fhq-http_f.txt
 python main.py --classify --file fhq-http.txt
 
@@ -115,6 +126,7 @@ python main.py --retry-http-failed --start 2001 --end 5000 --terminals 5
 
 # 交互模式
 python main.py
+# 进入后输入: local CVE-2024-23334，或 local-batch
 ```
 
 批量测试会按 `data/test_cases/*.txt` 中出现的 CVE 编号顺序执行，范围为 1-based 闭区间。批量模式会隐藏单条任务内部的查询、AI 生成和发包过程日志，只在每个 CVE 完成后显示最终结果、进度和正确率；明细会在每条结束后实时写入 `output/batch/`。
@@ -139,7 +151,24 @@ python main.py
 | `poc.http` | 原始 HTTP 请求 PoC |
 | `poc.yaml` | Nuclei YAML 模板（如有） |
 
-PCAP 文件保存在 `output/pcap/` 目录下。
+只有最终验证通过（当前 CVE 的 IPS 命中或目标侧 oracle 成功）的 PCAP 才会保存为 `data/cve/pcaps/YYYY-MM-DD/CVE.pcap`；失败候选的临时抓包会自动删除。同一天后续成功案例会覆盖该文件。可用 `PCAP_OUTPUT_DIR` 修改归档根目录。
+
+### 本地发包与抓包服务（Windows）
+
+已安装 Wireshark/Npcap 时，可启动与 `HTTP2PCAP_URL` 兼容的本地服务：
+
+```powershell
+python -m tools.local_http2pcap_service
+```
+
+服务默认监听 `http://127.0.0.1:3012`，使用 Npcap Loopback Adapter 抓取回环流量，且只允许向本机或私网地址发包。配置工作流：
+
+```dotenv
+HTTP2PCAP_URL=http://127.0.0.1:3012
+RUN_MODE=local_lab
+```
+
+健康检查为 `GET /api/health`，发包接口为 `POST /api/http2pcap`。每次请求会在 `data/cve/pcaps/YYYY-MM-DD/` 生成独立 `.pcap`；如果目标走物理网卡，可通过 `--interface <dumpcap接口编号或名称>` 指定接口，接口列表可用 `dumpcap -D` 查看。
 
 ## 返回状态码
 

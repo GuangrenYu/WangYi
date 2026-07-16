@@ -44,8 +44,29 @@ class RequestExecutor:
 
     name: str = "default_http_executor"
 
-    def execute(self, candidate: dict[str, Any], environment: dict[str, Any] | None = None) -> dict[str, Any]:
+    def execute(
+        self,
+        candidate: dict[str, Any],
+        environment: dict[str, Any] | None = None,
+        *,
+        cve_id: str = "",
+    ) -> dict[str, Any]:
         environment = environment or {}
+        if environment.get("local_container_mode") and not environment.get("target_url"):
+            return _with_executor_metadata(
+                {
+                    "success": False,
+                    "skipped": True,
+                    "policy_blocked": True,
+                    "error": "本地模式未匹配到可执行环境，已跳过",
+                    "error_type": "infrastructure",
+                    "ips_matches": [],
+                },
+                self.name,
+                "",
+                "",
+                step_results=[],
+            )
         target_url = environment.get("target_url") or _default_target_url()
         target_host = environment.get("target_host") or _target_host_from_url(target_url)
         policy = evaluate_execution_policy(
@@ -72,19 +93,20 @@ class RequestExecutor:
             )
 
         if candidate.get("request_steps"):
-            return self._execute_steps(candidate["request_steps"], target_url, target_host)
+            return self._execute_steps(candidate["request_steps"], target_url, target_host, cve_id)
 
         if candidate.get("nuclei_yaml"):
             result = send_poc_and_capture(
                 nuclei_yaml=candidate["nuclei_yaml"],
                 target_url=target_url,
+                cve_id=cve_id,
             )
             return _with_executor_metadata(result, self.name, target_url, target_host, step_results=[])
 
         raw_http = candidate.get("raw_http", "")
         if raw_http:
             raw_http = raw_http.replace("{{TARGET_HOST}}", target_host)
-            result = send_poc_and_capture(raw_http=raw_http)
+            result = send_poc_and_capture(raw_http=raw_http, cve_id=cve_id)
             return _with_executor_metadata(result, self.name, target_url, target_host, request_raw=raw_http, step_results=[])
 
         return _with_executor_metadata(
@@ -95,16 +117,16 @@ class RequestExecutor:
             step_results=[],
         )
 
-    def _execute_steps(self, steps: list[dict[str, Any]], target_url: str, target_host: str) -> dict[str, Any]:
+    def _execute_steps(self, steps: list[dict[str, Any]], target_url: str, target_host: str, cve_id: str) -> dict[str, Any]:
         step_results = []
         last_result: dict[str, Any] = {"success": False, "error": "request_steps 为空"}
         for index, step in enumerate(steps, start=1):
             raw_http = str(step.get("raw_http") or step.get("request") or "").replace("{{TARGET_HOST}}", target_host)
             nuclei_yaml = str(step.get("nuclei_yaml") or "")
             if nuclei_yaml:
-                result = send_poc_and_capture(nuclei_yaml=nuclei_yaml, target_url=target_url)
+                result = send_poc_and_capture(nuclei_yaml=nuclei_yaml, target_url=target_url, cve_id=cve_id)
             elif raw_http:
-                result = send_poc_and_capture(raw_http=raw_http)
+                result = send_poc_and_capture(raw_http=raw_http, cve_id=cve_id)
             else:
                 result = {"success": False, "error": f"第 {index} 步缺少可执行请求"}
             result = _with_executor_metadata(result, self.name, target_url, target_host, request_raw=raw_http, step_index=index)
@@ -198,9 +220,14 @@ class SuccessOracle:
         }
 
 
-def execute_candidate(candidate: dict[str, Any], environment: dict[str, Any] | None = None) -> dict[str, Any]:
+def execute_candidate(
+    candidate: dict[str, Any],
+    environment: dict[str, Any] | None = None,
+    *,
+    cve_id: str = "",
+) -> dict[str, Any]:
     """Execute a candidate with the default executor."""
-    return RequestExecutor().execute(candidate, environment)
+    return RequestExecutor().execute(candidate, environment, cve_id=cve_id)
 
 
 def evaluate_success(

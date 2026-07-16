@@ -18,6 +18,10 @@ archives/
 data/cve/pcaps/
 docs/references/zotero_import/
 third_party/vulhub/
+third_party/reapoc/
+third_party/vulnerability-poc/
+third_party/metarget/
+third_party/vulfocus/
 
 # NVD 本地数据包（大文件，可通过 --update-nvd 重新下载）
 poc_kb/nvd/

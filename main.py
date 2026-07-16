@@ -44,6 +44,7 @@ from cve_hunter.status_codes import (
     NOT_HTTP_VULN,
     PARAMETER_ERROR,
     STATUS_DESCRIPTIONS,
+    TARGET_ORACLE_SUCCESS,
 )
 
 console = Console()
@@ -106,7 +107,13 @@ def quiet_workflow_output():
         graph_module.console.quiet = old_graph_quiet
 
 
-def run_cve(cve_id: str, *, show_details: bool = True, generate_report: bool = True) -> CVEState:
+def run_cve(
+    cve_id: str,
+    *,
+    show_details: bool = True,
+    generate_report: bool = True,
+    local_container_mode: bool = False,
+) -> CVEState:
     """执行一次 CVE 复现流程。"""
     from cve_hunter.graph import build_graph
     from cve_hunter.state import CVEState
@@ -122,7 +129,11 @@ def run_cve(cve_id: str, *, show_details: bool = True, generate_report: bool = T
         ))
 
     graph = build_graph()
-    initial_state = CVEState(cve_id=cve_id, generate_report=generate_report)
+    initial_state = CVEState(
+        cve_id=cve_id,
+        generate_report=generate_report,
+        local_container_mode=local_container_mode,
+    )
 
     final_state = graph.invoke(initial_state)
 
@@ -378,7 +389,13 @@ def launch_vscode_task_group(group_label: str, tasks: list[dict]) -> None:
     console.print("[yellow]如果 VS Code 因安全策略没有自动运行任务，请在新窗口按 Ctrl+Shift+B 运行默认任务。[/yellow]")
 
 
-def launch_batch_terminals(test_file: Path, ranges: list[tuple[int, int]], *, generate_report: bool = False) -> None:
+def launch_batch_terminals(
+    test_file: Path,
+    ranges: list[tuple[int, int]],
+    *,
+    generate_report: bool = False,
+    local_container_mode: bool = False,
+) -> None:
     """按范围在 VS Code 集成终端执行批量测试。"""
     script = str(Path(__file__).resolve())
     tasks: list[dict] = []
@@ -397,21 +414,34 @@ def launch_batch_terminals(test_file: Path, ranges: list[tuple[int, int]], *, ge
         ]
         if generate_report:
             command_args.append("--report")
+        if local_container_mode:
+            command_args.append("--local-container")
         tasks.append(make_vscode_task(label, command_args))
         console.print(f"[green]已准备 VS Code 终端任务 {i}/{len(ranges)}:[/green] {chunk_start}-{chunk_end}")
     launch_vscode_task_group(f"CVE Hunter: Batch All ({len(ranges)} terminals)", tasks)
 
 
-def execute_cve_as_batch_result(index: int, cve_id: str, *, generate_report: bool = False) -> BatchResult:
+def execute_cve_as_batch_result(
+    index: int,
+    cve_id: str,
+    *,
+    generate_report: bool = False,
+    local_container_mode: bool = False,
+) -> BatchResult:
     """按批量结果格式执行并封装一次 CVE 复现。"""
     case_started = perf_counter()
     try:
         with quiet_workflow_output():
-            final_state = run_cve(cve_id, show_details=False, generate_report=generate_report)
+            final_state = run_cve(
+                cve_id,
+                show_details=False,
+                generate_report=generate_report,
+                local_container_mode=local_container_mode,
+            )
         ips_summary = final_state.get("ips_match_summary", {}) or {}
         ips_matched = bool(final_state.get("ips_matched", False))
         generic_ips_matched = bool(final_state.get("generic_ips_matched", False))
-        passed = final_state.get("status") == "SUCCESS" and ips_matched
+        passed = final_state.get("status") == "SUCCESS"
         status = final_state.get("status", "FAILURE")
         status_code = final_state.get("status_code", "")
         message = final_state.get("message", "")
@@ -467,6 +497,7 @@ def run_batch(
     terminal_count: int | None = None,
     *,
     generate_report: bool = False,
+    local_container_mode: bool = False,
 ) -> list[BatchResult]:
     """按测试文件中的 CVE 编号批量执行复现流程。"""
     should_prompt_terminals = terminal_count is None and (file_name is None or start is None or end is None)
@@ -486,7 +517,12 @@ def run_batch(
             title="批量测试多终端启动",
             border_style="cyan",
         ))
-        launch_batch_terminals(test_file, ranges, generate_report=generate_report)
+        launch_batch_terminals(
+            test_file,
+            ranges,
+            generate_report=generate_report,
+            local_container_mode=local_container_mode,
+        )
         return []
 
     console.print(Panel(
@@ -506,7 +542,12 @@ def run_batch(
 
     for offset, cve_id in enumerate(selected, start=1):
         absolute_index = start_index + offset - 1
-        result = execute_cve_as_batch_result(absolute_index, cve_id, generate_report=generate_report)
+        result = execute_cve_as_batch_result(
+            absolute_index,
+            cve_id,
+            generate_report=generate_report,
+            local_container_mode=local_container_mode,
+        )
         if result.passed:
             passed_count += 1
 
@@ -535,6 +576,7 @@ def run_continue(
     terminal_count: int | None = None,
     *,
     generate_report: bool = False,
+    local_container_mode: bool = False,
 ) -> list[BatchResult]:
     """继续测试：从原列表减去 output/batch 中已完成的 CVE，批量执行剩余。"""
     test_file = resolve_test_file(file_name)
@@ -573,6 +615,7 @@ def run_continue(
         end=total_remaining,
         terminal_count=selected_terminals,
         generate_report=generate_report,
+        local_container_mode=local_container_mode,
     )
 
 
@@ -785,7 +828,7 @@ def is_retry_http_failed_result(result: dict) -> bool:
 
 def is_retry_passed_result(result: dict) -> bool:
     """正确数据核验处理历史通过记录，用于清理旧的 IPS 泛化误判。"""
-    return bool(result.get("passed")) and str(result.get("status_code", "")).upper() == CAPTURE_SUCCESS
+    return bool(result.get("passed")) and str(result.get("status_code", "")).upper() in {CAPTURE_SUCCESS, TARGET_ORACLE_SUCCESS}
 
 
 def parse_retry_status_codes(values: list[str] | None) -> set[str]:
@@ -835,8 +878,8 @@ def retry_mode_description(retry_mode: str, retry_status_codes: set[str] | None 
         return f"指定状态码核验: status_code in [{codes}]"
     descriptions = {
         "failed": "失败数据核验: HTTP 失败记录，排除 NOT_HTTP_VULN/PARAMETER_ERROR",
-        "passed": "正确数据核验: status_code == CAPTURE_SUCCESS 且 passed == true",
-        "all": "失败+正确数据核验: HTTP 失败记录或 CAPTURE_SUCCESS",
+        "passed": "正确数据核验: status_code 为 CAPTURE_SUCCESS 或 TARGET_ORACLE_SUCCESS",
+        "all": "失败+正确数据核验: HTTP 失败记录或已验证成功",
     }
     return descriptions.get(retry_mode, retry_mode)
 
@@ -1330,12 +1373,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--retry-shard", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--retry-shards", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--report", action="store_true", help="批量/二次核验模式下生成 LLM 分析报告（单CVE模式默认生成）")
+    parser.add_argument("--local-container", action="store_true", help="仅使用本地 Docker/Vulhub 环境；环境不可用时不回退远程目标")
     return parser.parse_args(argv)
 
 
 def interactive_loop() -> None:
     console.print("[bold cyan]CVE Hunter[/bold cyan] - 基于 LangGraph 的漏洞自动复现")
-    console.print("输入 CVE 编号开始复现；输入 batch 批量测试；输入 continue 继续测试；输入 retry 二次核验失败记录；输入 retry-passed 核验历史通过记录；输入 retry-status 按状态码核验；输入 classify 分类筛选；输入 stats 批量统计；输入 update-nvd 更新本地NVD数据；输入 quit 退出\n")
+    console.print(
+        "普通模式: 输入 CVE 编号；本地模式: 输入 local CVE-YYYY-NNNN\n"
+        "批量模式: batch；本地批量: local-batch；继续测试: continue\n"
+        "其他: retry / retry-passed / retry-status / classify / stats / update-nvd / quit\n"
+    )
     while True:
         try:
             cve_id = console.input("[bold green]CVE>[/bold green] ").strip()
@@ -1347,6 +1395,15 @@ def interactive_loop() -> None:
             break
         if cve_id.lower() in ("batch", "b"):
             run_batch()
+            console.print()
+            continue
+        if cve_id.lower() in ("local-batch", "lb"):
+            run_batch(local_container_mode=True)
+            console.print()
+            continue
+        if cve_id.lower().startswith("local "):
+            local_cve = cve_id.split(None, 1)[1].strip()
+            run_cve(local_cve, local_container_mode=True)
             console.print()
             continue
         if cve_id.lower() in ("continue", "resume", "cont"):
@@ -1425,12 +1482,24 @@ def main():
 
     if args.batch:
         batch_file = args.file or args.cve_id
-        run_batch(batch_file, args.start, args.end, args.terminals, generate_report=args.report)
+        run_batch(
+            batch_file,
+            args.start,
+            args.end,
+            args.terminals,
+            generate_report=args.report,
+            local_container_mode=args.local_container,
+        )
         return
 
     if args.continue_mode:
         continue_file = args.file or args.cve_id
-        run_continue(continue_file, args.terminals, generate_report=args.report)
+        run_continue(
+            continue_file,
+            args.terminals,
+            generate_report=args.report,
+            local_container_mode=args.local_container,
+        )
         return
 
     if args.classify:
@@ -1465,7 +1534,7 @@ def main():
         raise SystemExit("--file/--start/--end/--terminals 只能和 --batch/--continue/--retry-http-failed 一起使用")
 
     if args.cve_id:
-        run_cve(args.cve_id)
+        run_cve(args.cve_id, local_container_mode=args.local_container)
     else:
         interactive_loop()
 

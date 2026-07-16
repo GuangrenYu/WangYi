@@ -98,59 +98,6 @@ JSON 格式：
 4. 证据不足时降低 confidence，不要编造不存在的产品路径
 """
 
-POC_REFLECTION_AFTER_VERIFY = """\
-你是一位网络安全专家，负责在 PoC 验证失败后做有限修正。
-
-## 漏洞信息
-- CVE 编号: {cve_id}
-- 描述: {description}
-- 受影响产品: {affected_products}
-- 漏洞类型: {vuln_type}
-
-## 当前失败候选
-{current_candidate}
-
-## 验证反馈
-- HTTP 状态码: {http_status_code}
-- 响应片段:
-{http_response_body}
-- 当前 CVE IPS 命中: {ips_matched}
-- 通用/非当前 CVE IPS 命中: {generic_ips_matched}
-- IPS 命中统计: {ips_match_summary}
-
-## 最近尝试轨迹
-{attempt_history}
-
-## 任务
-基于失败反馈，生成 0-2 个当前 PoC 的小变体候选。
-请严格只输出 JSON，不要输出 Markdown、代码块或解释文本。
-
-JSON 格式：
-{{
-  "candidates": [
-    {{
-      "method": "GET",
-      "path": "/path",
-      "headers": {{
-        "Host": "{{{{TARGET_HOST}}}}",
-        "User-Agent": "Mozilla/5.0",
-        "Accept": "*/*"
-      }},
-      "body": "",
-      "evidence_url": "沿用或补充支持该变体的 URL，没有则为空字符串",
-      "confidence": 0.0,
-      "reason": "为什么这个变体可能修正上一次失败"
-    }}
-  ]
-}}
-
-限制：
-1. 只能调整 path、query/body 参数、header、method、Content-Type、URL 编码形式
-2. 不要更换产品、CVE、漏洞链或编造全新利用路径
-3. 如果失败原因无法通过小改动修正，输出 {{"candidates": []}}
-4. Host 必须使用 {{{{TARGET_HOST}}}} 占位符
-"""
-
 ANALYSIS_REPORT = """\
 你是一位网络安全分析师。请根据以下漏洞复现过程的信息，生成一份简洁的分析报告。
 

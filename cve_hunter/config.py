@@ -31,6 +31,13 @@ def _int_env(name: str, default: int) -> int:
         return default
 
 
+def _bool_env(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
 @dataclass(frozen=True)
 class Config:
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
@@ -56,12 +63,20 @@ class Config:
 
     # 本地 PoC 知识库目录
     poc_kb_dir: str = field(default_factory=lambda: os.getenv("POC_KB_DIR", "poc_kb"))
+    # 工作流导入的本地 PCAP 数据目录，可从已生成攻击报文中反解 Raw HTTP PoC
+    local_kb_pcap_dir: str = field(default_factory=lambda: os.getenv("LOCAL_KB_PCAP_DIR", "data/cve/pcaps"))
+    # 本地 KB 命中 trickest GitHub 链接时是否继续联网猜测 raw 文件；默认关闭以保证本地搜索秒级返回
+    local_kb_github_fetch: bool = field(
+        default_factory=lambda: os.getenv("LOCAL_KB_GITHUB_FETCH", "false").strip().lower() in {"1", "true", "yes", "on"}
+    )
 
     # 本地 NVD 数据库目录
     nvd_local_dir: str = field(default_factory=lambda: os.getenv("NVD_LOCAL_DIR", "poc_kb/nvd"))
 
     # 输出目录
     output_dir: str = field(default_factory=lambda: os.getenv("OUTPUT_DIR", "output"))
+    # 测试流量按日期归档到该目录下的 YYYY-MM-DD 子目录
+    pcap_output_dir: str = field(default_factory=lambda: os.getenv("PCAP_OUTPUT_DIR", "data/cve/pcaps"))
 
     # 请求超时(秒)
     request_timeout: int = field(default_factory=lambda: int(os.getenv("REQUEST_TIMEOUT", "30")))
@@ -75,6 +90,27 @@ class Config:
     )
     # 本地 vulhub 目录；若存在 **/<CVE-ID>/docker-compose.yml，可自动规划/启动
     vulhub_dir: str = field(default_factory=lambda: os.getenv("VULHUB_DIR", "third_party/vulhub"))
+    # 其他本地漏洞环境源。Reapoc 允许 compose 位于 <CVE-ID>/vultarget/ 下。
+    reapoc_dir: str = field(default_factory=lambda: os.getenv("REAPOC_DIR", "third_party/reapoc"))
+    vulnerability_poc_dir: str = field(
+        default_factory=lambda: os.getenv("VULNERABILITY_POC_DIR", "third_party/vulnerability-poc")
+    )
+    metarget_dir: str = field(default_factory=lambda: os.getenv("METARGET_DIR", "third_party/metarget"))
+    environment_repo_auto_clone: bool = field(
+        default_factory=lambda: _bool_env("ENVIRONMENT_REPO_AUTO_CLONE", True)
+    )
+    environment_healthcheck_timeout: int = field(
+        default_factory=lambda: _int_env("ENVIRONMENT_HEALTHCHECK_TIMEOUT", 90)
+    )
+    # Metarget 会修改宿主机 Docker/Kubernetes/内核，必须单独显式授权。
+    metarget_execution_enabled: bool = field(
+        default_factory=lambda: _bool_env("METARGET_EXECUTION_ENABLED", False)
+    )
+    metarget_target_url: str = field(default_factory=lambda: os.getenv("METARGET_TARGET_URL", ""))
+    # Vulfocus 开放 API。未配置完整认证信息时仅禁用该 provider，不影响其他环境源。
+    vulfocus_api_url: str = field(default_factory=lambda: os.getenv("VULFOCUS_API_URL", ""))
+    vulfocus_username: str = field(default_factory=lambda: os.getenv("VULFOCUS_USERNAME", ""))
+    vulfocus_licence: str = field(default_factory=lambda: os.getenv("VULFOCUS_LICENCE", ""))
     # 显式指定 docker-compose 文件时优先使用
     attack_env_compose_file: str = field(default_factory=lambda: os.getenv("ATTACK_ENV_COMPOSE_FILE", ""))
     # 自动环境目标 URL；不配置时从 compose 端口映射猜测，猜不到则回退 TARGET_IP

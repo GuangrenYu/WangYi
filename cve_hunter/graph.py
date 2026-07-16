@@ -39,7 +39,6 @@ from cve_hunter.poc_parser import extract_http_requests, parse_poc_candidates_js
 from cve_hunter.prompts.templates import (
     POC_GENERATION_FROM_REFS,
     POC_GENERATION_FROM_SEARCH,
-    POC_REFLECTION_AFTER_VERIFY,
     ANALYSIS_REPORT,
 )
 from cve_hunter.tools.nvd import query_nvd
@@ -48,6 +47,7 @@ from cve_hunter.tools.poc_sources import search_nuclei, search_exploitdb, search
 from cve_hunter.tools.local_kb import search_local_kb, save_to_local_kb
 from cve_hunter.tools.web_search import search_web
 from cve_hunter.verification import evaluate_success, execute_candidate
+from cve_hunter.tools.http_sender import finalize_capture
 from cve_hunter.status_codes import (
     AI_REPRODUCTION_FAILED,
     CAPTURE_SUCCESS,
@@ -274,6 +274,8 @@ def node_environment_agent(state: CVEState) -> dict:
         message=milestone_message,
         data={
             "source": env.get("source", ""),
+            "provider": env.get("provider", ""),
+            "launcher": env.get("launcher", ""),
             "target_url": env.get("target_url", ""),
             "candidate_count": len(result["environment_candidates"]),
             "manifest_path": manifest_path,
@@ -285,7 +287,7 @@ def node_environment_agent(state: CVEState) -> dict:
             milestones,
             "environment_ready",
             "passed" if setup_result.get("success") else "failed",
-            message=setup_result.get("error", "") or "compose setup completed",
+            message=setup_result.get("error", "") or "environment setup completed",
             data={"setup_result": setup_result},
         )
     else:
@@ -312,8 +314,19 @@ def node_environment_agent(state: CVEState) -> dict:
         errors.append(manifest_error)
     if errors:
         updates["error_messages"] = state.error_messages + errors
-        if cfg.auto_env_enabled:
+        if cfg.auto_env_enabled or state.local_container_mode:
             updates.update(make_status_update(state.status_code, INFRASTRUCTURE_FAILED, errors[0]))
+        if state.local_container_mode:
+            updates["current_phase"] = "generate_report"
+    setup_result = env.get("setup_result") if isinstance(env.get("setup_result"), dict) else {}
+    if env.get("setup_mode") == "disabled":
+        console.print(f"  [dim]环境启动已禁用 (AUTO_ENV_ENABLED=false)[/]")
+    elif setup_result.get("success"):
+        console.print(f"  [green]✓[/] 攻击环境已启动")
+    elif setup_result:
+        console.print(f"  [red]✗[/] 攻击环境启动失败: {setup_result.get('error', '未知错误')}")
+    else:
+        console.print(f"  [dim]环境候选已记录，未实际启动[/]")
     console.print(f"  [green]✓[/] target={env.get('target_url', '')} source={env.get('source', '')}")
     return updates
 
@@ -413,6 +426,9 @@ def node_poc_from_refs(state: CVEState) -> dict:
     console.print("[bold cyan]▶ 基于 References 生成 PoC[/]")
 
     if not state.reference_contents:
+        if state.nvd_references and "reference_analysis" not in set(state.phases_tried):
+            console.print("  [yellow]⚠ 尚未分析 References，先提取网页内容[/]")
+            return {"current_phase": "reference_analysis"}
         console.print("  [yellow]⚠ 无 Reference 内容，跳过[/]")
         return {"current_phase": "nuclei_search", "phases_tried": state.phases_tried + ["poc_from_refs"]}
 
@@ -775,7 +791,7 @@ def node_verify_poc(state: CVEState) -> dict:
             "ips_matches": [],
         }
     else:
-        result = execute_candidate(candidate, environment)
+        result = execute_candidate(candidate, environment, cve_id=state.cve_id)
     oracle = evaluate_success(state=state, candidate=candidate, result=result, environment=environment)
 
     success = result.get("success", False)
@@ -784,6 +800,11 @@ def node_verify_poc(state: CVEState) -> dict:
     ips_matched = oracle["ips_matched"]
     generic_ips_matched = oracle["generic_ips_matched"]
     target_oracle = oracle["target_oracle"]
+    validation_succeeded = bool(ips_matched or target_oracle.get("success"))
+    result["pcap_file_path"] = finalize_capture(
+        result.get("pcap_file_path", ""),
+        keep=validation_succeeded,
+    )
     request_status = "skipped" if result.get("policy_blocked") or result.get("skipped") else ("passed" if success else "failed")
     milestones = _mark_milestone_map(
         milestones,
@@ -805,7 +826,7 @@ def node_verify_poc(state: CVEState) -> dict:
         message=oracle["message"],
         data={"outcome": oracle["outcome"], "success_level": oracle["success_level"]},
     )
-    confirm_status = "passed" if ips_matched or target_oracle.get("success") else ("skipped" if result.get("policy_blocked") else "failed")
+    confirm_status = "passed" if ips_matched else ("skipped" if result.get("policy_blocked") else "failed")
     milestones = _mark_milestone_map(
         milestones,
         "cve_confirmed",
@@ -867,7 +888,7 @@ def node_verify_poc(state: CVEState) -> dict:
         )
         updates["status"] = "SUCCESS"
         updates["status_code"] = oracle["status_code"]
-        updates["message"] = oracle["message"]
+        updates["message"] = "目标侧 oracle 验证成功，漏洞复现有效"
         updates["current_phase"] = "archive"
         updates["attempt_history"] = _append_attempt_history(
             state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
@@ -886,7 +907,7 @@ def node_verify_poc(state: CVEState) -> dict:
             state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
             oracle_result=oracle, candidate=candidate,
         )
-        updates.update(_next_attempt_or_phase_update(state, allow_reflection=True))
+        updates.update(_next_attempt_or_phase_update(state))
     elif success:
         console.print(
             f"  [yellow]请求成功但没有利用成功证据[/] "
@@ -897,7 +918,7 @@ def node_verify_poc(state: CVEState) -> dict:
             state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
             oracle_result=oracle, candidate=candidate,
         )
-        updates.update(_next_attempt_or_phase_update(state, allow_reflection=True))
+        updates.update(_next_attempt_or_phase_update(state))
     else:
         verify_source = "policy" if result.get("policy_blocked") else ("http2pcap" if cfg.http2pcap_url else "target")
         hint = classify_error(result.get("error", "未知错误"), source=verify_source, error_type=result.get("error_type", ""))
@@ -941,68 +962,19 @@ def node_trigger_agent(state: CVEState) -> dict:
     }
 
 
-def node_reflect_after_verify(state: CVEState) -> dict:
-    """验证失败后基于反馈生成少量 PoC 变体。"""
-    console.print("[bold cyan]▶ 反思验证失败并生成变体[/]")
-
-    next_phase = _next_phase_after_verify(state)
-    if not _should_reflect_after_verify(state):
-        return {"current_phase": next_phase}
-
-    current_candidate = _candidate_history_view(_current_candidate(state))
-    prompt = POC_REFLECTION_AFTER_VERIFY.format(
-        cve_id=state.cve_id,
-        description=state.nvd_description or "无",
-        affected_products=", ".join(state.affected_products[:5]) or "无",
-        vuln_type=state.vuln_type or "未知",
-        current_candidate=json.dumps(current_candidate, ensure_ascii=False, indent=2),
-        http_status_code=state.http_status_code or "无",
-        http_response_body=(state.http_response_body or "无")[:1200],
-        ips_matched=state.ips_matched,
-        generic_ips_matched=state.generic_ips_matched,
-        ips_match_summary=json.dumps(state.ips_match_summary, ensure_ascii=False) if state.ips_match_summary else "无",
-        attempt_history=json.dumps(state.attempt_history[-3:], ensure_ascii=False, indent=2) if state.attempt_history else "无",
-    )
-
-    reflection_source = f"{state.poc_source or 'unknown'}_reflection"
-    updates = {
-        "reflection_rounds": state.reflection_rounds + 1,
-        "phases_tried": state.phases_tried + ["reflect_after_verify"],
-    }
-
-    try:
-        result = invoke_llm(prompt)
-        candidates = _llm_poc_candidates(
-            result,
-            source=reflection_source,
-            evidence_url=current_candidate.get("evidence_url", ""),
-            confidence=min(float(current_candidate.get("confidence") or 0.5), 0.6),
-            reason="验证失败后的有限变体",
-        )
-        if candidates:
-            console.print(f"  [green]✓[/] 反思生成 {len(candidates)} 个变体候选")
-            updates.update(_candidate_update(state, candidates, fallback_phase=next_phase))
-            return updates
-        console.print("  [yellow]⚠ 反思未生成有效变体[/]")
-    except Exception as e:
-        hint = classify_error(e, source="llm")
-        console.print(f"  [red]✗ 反思生成失败:[/] {e}")
-        updates["error_messages"] = state.error_messages + [f"反思生成 PoC 变体失败: {e}"]
-        updates.update(make_status_update(state.status_code, hint.code, hint.message))
-
-    updates["current_phase"] = next_phase
-    return updates
-
-
 def node_archive(state: CVEState) -> dict:
     """验证成功后的快速归档。"""
-    console.print("[bold cyan]▶ 验证成功，进入归档[/]")
+    console.print("[bold cyan]▶ 当前 CVE IPS 命中，进入归档[/]")
     return {"current_phase": "save_to_local_kb"}
 
 
 def node_save_to_local_kb(state: CVEState) -> dict:
     """验证成功后将 PoC 保存到本地知识库 custom/ 目录。"""
     console.print("[bold cyan]▶ 保存 PoC 到本地知识库[/]")
+
+    if state.status_code != CAPTURE_SUCCESS:
+        console.print("  [dim]未获得验证成功证据，不写入 custom 知识库[/]")
+        return {"current_phase": "generate_report"}
 
     if state.poc_raw_http or state.poc_nuclei_yaml:
         metadata = {
@@ -1132,8 +1104,6 @@ def node_generate_report(state: CVEState) -> dict:
         "target_oracle_type": state.target_oracle_type,
         "target_oracle_details": state.target_oracle_details,
         "success_level": state.success_level,
-        "reflection_rounds": state.reflection_rounds,
-        "max_reflection_rounds": state.max_reflection_rounds,
         "phases_tried": state.phases_tried,
         "ips_matched": state.ips_matched,
         "generic_ips_matched": state.generic_ips_matched,
@@ -1192,8 +1162,28 @@ def _raw_http_candidates(
             "evidence_url": evidence_url,
             "confidence": confidence,
             "reason": reason,
+            "validation_hint": _infer_raw_http_validation_hint(raw_http),
         })
     return candidates
+
+
+def _infer_raw_http_validation_hint(raw_http: str) -> dict:
+    text = raw_http.lower()
+    if any(marker in text for marker in (
+        "/etc/passwd",
+        "etc/passwd",
+        "../",
+        "..%2f",
+        "%2e%2e",
+        "boot.ini",
+        "win.ini",
+    )):
+        return {
+            "type": "response_contains",
+            "markers": ["root:", "[boot loader]", "[extensions]", "localhost"],
+            "case_sensitive": False,
+        }
+    return {}
 
 
 def _nuclei_candidate(
@@ -1369,7 +1359,7 @@ def _select_candidate_update(candidate: dict, index: int) -> dict:
     }
 
 
-def _next_attempt_or_phase_update(state: CVEState, *, allow_reflection: bool = False) -> dict:
+def _next_attempt_or_phase_update(state: CVEState) -> dict:
     """验证失败后优先切换到候选池里的下一个 PoC。"""
     next_index = state.current_candidate_index + 1
     if next_index < len(state.poc_candidates):
@@ -1383,20 +1373,7 @@ def _next_attempt_or_phase_update(state: CVEState, *, allow_reflection: bool = F
             **_select_candidate_update(candidate, next_index),
         }
 
-    if allow_reflection and _should_reflect_after_verify(state):
-        return {"current_phase": "reflect_after_verify"}
-
     return {"current_phase": _next_phase_after_verify(state)}
-
-
-def _should_reflect_after_verify(state: CVEState) -> bool:
-    if state.reflection_rounds >= state.max_reflection_rounds:
-        return False
-    if not state.poc_raw_http:
-        return False
-    if state.status == "SUCCESS":
-        return False
-    return bool(state.poc_candidates)
 
 
 def _append_attempt_history(
@@ -1513,7 +1490,7 @@ def _extract_http_requests(text: str, cve_id: str) -> list[str]:
 def _next_phase_after_verify(state: CVEState) -> str:
     """验证失败后确定下一个阶段。"""
     phase_order = [
-        "local_kb_search", "poc_from_refs", "nuclei_search",
+        "local_kb_search", "reference_analysis", "poc_from_refs", "nuclei_search",
         "exploitdb_search", "imfht_search", "web_search",
     ]
 
@@ -1561,6 +1538,13 @@ def route_after_type_check(state: CVEState) -> str:
     return "environment_agent"
 
 
+def route_after_environment(state: CVEState) -> str:
+    """Respect local-mode environment failures instead of continuing PoC discovery."""
+    if state.current_phase == "generate_report":
+        return "generate_report"
+    return "local_kb_search"
+
+
 def route_after_local_kb(state: CVEState) -> str:
     """本地 KB 搜索后路由：找到 PoC 则直接验证，否则继续常规流程。"""
     if state.current_phase == "verify_poc":
@@ -1584,7 +1568,6 @@ def route_after_phase(state: CVEState) -> str:
         "imfht_search": "imfht_search",
         "web_search": "web_search",
         "verify_poc": "verify_poc",
-        "reflect_after_verify": "reflect_after_verify",
         "archive": "archive",
         "save_to_local_kb": "save_to_local_kb",
         "generate_report": "generate_report",
@@ -1617,7 +1600,6 @@ def build_graph() -> StateGraph:
     workflow.add_node("imfht_search", node_imfht_search)
     workflow.add_node("web_search", node_web_search)
     workflow.add_node("verify_poc", node_verify_poc)
-    workflow.add_node("reflect_after_verify", node_reflect_after_verify)
     workflow.add_node("archive", node_archive)
     workflow.add_node("save_to_local_kb", node_save_to_local_kb)
     workflow.add_node("generate_report", node_generate_report)
@@ -1629,7 +1611,7 @@ def build_graph() -> StateGraph:
     workflow.add_conditional_edges("validate_input", route_after_validate)
     workflow.add_edge("query_nvd", "vuln_type_check")
     workflow.add_conditional_edges("vuln_type_check", route_after_type_check)
-    workflow.add_edge("environment_agent", "local_kb_search")
+    workflow.add_conditional_edges("environment_agent", route_after_environment)
     workflow.add_conditional_edges("local_kb_search", route_after_local_kb)
     workflow.add_edge("reference_analysis", "trigger_agent")
     workflow.add_edge("trigger_agent", "poc_from_refs")
@@ -1637,7 +1619,7 @@ def build_graph() -> StateGraph:
     # PoC 搜索链和验证的路由
     for node in ["poc_from_refs", "nuclei_search", "exploitdb_search",
                   "imfht_search", "web_search", "verify_poc",
-                  "reflect_after_verify", "archive", "save_to_local_kb"]:
+                  "archive", "save_to_local_kb"]:
         workflow.add_conditional_edges(node, route_after_phase)
 
     workflow.add_edge("generate_report", END)

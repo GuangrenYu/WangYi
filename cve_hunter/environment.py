@@ -29,6 +29,9 @@ class EnvironmentSpec:
     target_url: str = ""
     target_host: str = ""
     source: str = "default_target"
+    provider: str = "default"
+    launcher: str = "none"
+    fidelity: str = "unknown"
     kind: str = "remote_or_existing_target"
     compose_file: str = ""
     workdir: str = ""
@@ -65,9 +68,12 @@ def build_environment_spec(
     setup_mode = str(environment.get("setup_mode") or ("docker_compose" if compose_file else "not_required"))
     source = str(environment.get("source") or selected.get("source") or "default_target")
     kind = str(environment.get("kind") or selected.get("kind") or "remote_or_existing_target")
+    provider = str(environment.get("provider") or selected.get("provider") or "default")
+    launcher = str(environment.get("launcher") or selected.get("launcher") or "none")
+    fidelity = str(environment.get("fidelity") or selected.get("fidelity") or "unknown")
 
     confidence = 0.35
-    if source in {"explicit_compose", "vulhub_local"}:
+    if source in {"explicit_compose", "vulhub_local", "reapoc_local", "vulfocus_api"}:
         confidence = 0.75
     if setup_result.get("success"):
         confidence = 0.9
@@ -77,6 +83,9 @@ def build_environment_spec(
         target_url=target_url,
         target_host=target_host,
         source=source,
+        provider=provider,
+        launcher=launcher,
+        fidelity=fidelity,
         kind=kind,
         compose_file=compose_file,
         workdir=str(environment.get("workdir") or selected.get("workdir") or ""),

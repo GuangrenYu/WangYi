@@ -9,8 +9,6 @@ Agent 职责速览：
 - CriticAgent：负责审查当前 PoC 候选是否可执行，并补充 trigger_id、
   attack_objective、validation_hint、preconditions，降低缺证据/格式异常候选的
   置信度。它不搜索情报、不发包、不生成新 PoC。
-- ReflectionAgent：当前仍在 graph.py 的 node_reflect_after_verify 中实现，负责
-  根据失败反馈生成少量小变体。后续可迁移到本模块并改为枚举化动作输出。
 - ReporterAgent：当前由 graph.py 的 node_generate_report 承担，负责归档
   agent_trace、attempt_history、oracle_result 和最终报告。
 
@@ -22,9 +20,12 @@ deepseek-v4-pro。LLM 调用失败时会自动退回确定性规则，保持主�
 from __future__ import annotations
 
 import json
+import os
+import platform
 import re
 import shutil
 import subprocess
+import time
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -32,10 +33,17 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
+import httpx
 
 from cve_hunter.config import cfg
 from cve_hunter.llm import invoke_llm
 from cve_hunter.state import CVEState
+
+
+_COMPOSE_NAMES = {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
+_CVE_PART_PATTERN = re.compile(r"CVE[-_]([0-9]{4})[-_]([0-9]{4,7})", re.IGNORECASE)
+_compose_index_cache: dict[str, dict[str, list[Path]]] = {}
+_vulfocus_image_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
 
 
 def append_agent_trace(
@@ -61,42 +69,64 @@ def append_agent_trace(
 def run_environment_agent(state: CVEState) -> dict[str, Any]:
     """Plan and optionally start a local attack environment.
 
-    默认只规划，不执行 Docker。设置 AUTO_ENV_ENABLED=true 后：
-    - 若 ATTACK_ENV_COMPOSE_FILE 指向 compose 文件，则执行该文件。
-    - 否则在 VULHUB_DIR 下查找 **/<CVE-ID>/docker-compose.y*ml 并执行。
+    默认只规划。启用自动环境或本地容器模式后，按候选优先级尝试对应
+    launcher，并在一个来源启动失败时回退到下一个来源。
     """
+    local_container_mode = state.local_container_mode
+    bootstrap_errors: list[str] = []
+    if local_container_mode:
+        bootstrap = _ensure_environment_repositories()
+        bootstrap_errors = list(bootstrap.get("errors") or [])
+
     candidates = _discover_environment_candidates(state.cve_id)
     environment = _default_environment()
+    environment["local_container_mode"] = local_container_mode
     status = "planned"
     summary = "使用默认目标地址，未发现可自动搭建环境"
     errors: list[str] = []
 
     if candidates:
-        environment.update(candidates[0])
-        environment["target_url"] = cfg.attack_env_target_url or environment.get("target_url") or _default_target_url()
-        environment["target_host"] = _target_host_from_url(environment["target_url"])
+        _select_environment_candidate(environment, candidates[0])
         summary = f"发现攻击环境候选: {environment.get('source', 'unknown')}"
 
-    if cfg.auto_env_enabled and candidates:
-        run_result = _start_compose_environment(candidates[0])
+    if (cfg.auto_env_enabled or local_container_mode) and candidates:
+        selected, run_result = _start_environment_candidates(candidates)
+        if selected:
+            _select_environment_candidate(environment, selected)
+        if run_result.get("target_url"):
+            environment["target_url"] = run_result["target_url"]
+            environment["target_host"] = _target_host_from_url(run_result["target_url"])
         environment["setup_result"] = run_result
         if run_result["success"]:
             status = "started"
-            summary = f"已启动攻击环境: {environment.get('target_url', '')}"
+            summary = (
+                f"已通过 {environment.get('provider', environment.get('source', 'unknown'))} "
+                f"启动攻击环境: {environment.get('target_url', '')}"
+            )
         else:
             status = "setup_failed"
             errors.append(run_result.get("error", "攻击环境启动失败"))
             summary = errors[-1]
-    elif cfg.auto_env_enabled and not candidates:
+            if not local_container_mode:
+                fallback_url = _default_target_url()
+                environment["target_url"] = fallback_url
+                environment["target_host"] = _target_host_from_url(fallback_url)
+    elif (cfg.auto_env_enabled or local_container_mode) and not candidates:
         status = "not_found"
-        errors.append("未找到可自动搭建的 docker-compose 环境")
+        detail = f"所有已接入环境源均未匹配到 {state.cve_id}，已跳过"
+        if bootstrap_errors:
+            detail = f"{detail}；" + "；".join(bootstrap_errors)
+        errors.append(detail)
         summary = errors[-1]
+        if local_container_mode:
+            environment["target_url"] = ""
+            environment["target_host"] = ""
     elif not cfg.auto_env_enabled:
         environment["setup_mode"] = "disabled"
 
     llm_plan = {}
     llm_error = ""
-    if getattr(cfg, "agent_llm_enabled", False):
+    if getattr(cfg, "agent_llm_enabled", False) and not (local_container_mode and not candidates):
         try:
             llm_plan = _run_environment_agent_llm(state, candidates, environment)
             environment["llm_plan"] = llm_plan
@@ -118,6 +148,7 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
             "summary": summary,
             "data": {
                 "auto_env_enabled": cfg.auto_env_enabled,
+                "local_container_mode": local_container_mode,
                 "candidate_count": len(candidates),
                 "target_url": environment.get("target_url", ""),
                 "llm_enabled": getattr(cfg, "agent_llm_enabled", False),
@@ -424,26 +455,189 @@ def _discover_environment_candidates(cve_id: str) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     explicit = Path(cfg.attack_env_compose_file).expanduser() if cfg.attack_env_compose_file else None
     if explicit and explicit.is_file():
-        candidates.append(_compose_candidate(explicit, source="explicit_compose", reason="ATTACK_ENV_COMPOSE_FILE 指定"))
+        candidates.append(_compose_candidate(
+            explicit,
+            source="explicit_compose",
+            provider="explicit",
+            fidelity="user_supplied",
+            priority=0,
+            reason="ATTACK_ENV_COMPOSE_FILE 指定",
+        ))
 
-    vulhub_root = Path(cfg.vulhub_dir).expanduser()
-    if vulhub_root.is_dir():
-        pattern = cve_id.upper()
-        compose_files = []
-        for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"):
-            compose_files.extend(vulhub_root.glob(f"**/{pattern}/{name}"))
-            compose_files.extend(vulhub_root.glob(f"**/{pattern.lower()}/{name}"))
-        for compose_file in sorted(set(compose_files)):
-            candidates.append(_compose_candidate(compose_file, source="vulhub_local", reason="本地 vulhub 命中"))
+    for spec in _configured_compose_roots():
+        root = Path(spec["path"]).expanduser()
+        for compose_file in _compose_files_for_cve(root, cve_id):
+            candidates.append(_compose_candidate(
+                compose_file,
+                source=spec["source"],
+                provider=spec["provider"],
+                fidelity=spec["fidelity"],
+                priority=spec["priority"],
+                reason=spec["reason"],
+            ))
 
-    return _dedupe_candidates(candidates)
+    candidates.extend(_discover_vulfocus_candidates(cve_id))
+    candidates.extend(_discover_metarget_candidates(cve_id))
+    return sorted(_dedupe_candidates(candidates), key=_environment_candidate_sort_key)
 
 
-def _compose_candidate(path: Path, *, source: str, reason: str) -> dict[str, Any]:
+def _configured_compose_roots() -> list[dict[str, Any]]:
+    specs = [
+        {
+            "path": getattr(cfg, "vulhub_dir", "third_party/vulhub"),
+            "source": "vulhub_local",
+            "provider": "vulhub",
+            "fidelity": "real_product",
+            "priority": 10,
+            "reason": "本地 Vulhub 命中",
+        },
+        {
+            "path": getattr(cfg, "reapoc_dir", ""),
+            "source": "reapoc_local",
+            "provider": "reapoc",
+            "fidelity": "real_product",
+            "priority": 20,
+            "reason": "本地 Reapoc 命中",
+        },
+        {
+            "path": getattr(cfg, "vulnerability_poc_dir", ""),
+            "source": "vulnerability_poc_local",
+            "provider": "vulnerability_poc",
+            "fidelity": "trigger_simulation",
+            "priority": 30,
+            "reason": "本地 vulnerability-poc 模拟环境命中",
+        },
+    ]
+    return [spec for spec in specs if str(spec["path"] or "").strip()]
+
+
+def _compose_files_for_cve(root: Path, cve_id: str) -> list[Path]:
+    if not root.is_dir():
+        return []
+    return _compose_index_for_root(root).get(_normalize_cve_id(cve_id), [])
+
+
+def _compose_index_for_root(root: Path) -> dict[str, list[Path]]:
+    key = str(root.resolve())
+    cached = _compose_index_cache.get(key)
+    if cached is not None:
+        return cached
+
+    index: dict[str, list[Path]] = {}
+    try:
+        paths = root.rglob("*")
+        for path in paths:
+            if not path.is_file() or path.name.lower() not in _COMPOSE_NAMES:
+                continue
+            relative_parts = path.relative_to(root).parts[:-1]
+            cve_id = next(
+                (_normalize_cve_id(part) for part in reversed(relative_parts) if _is_cve_id(part)),
+                "",
+            )
+            if cve_id:
+                index.setdefault(cve_id, []).append(path.resolve())
+    except OSError:
+        index = {}
+
+    _compose_index_cache[key] = {
+        cve_id: sorted(set(paths), key=lambda item: (len(item.parts), str(item).lower()))
+        for cve_id, paths in index.items()
+    }
+    return _compose_index_cache[key]
+
+
+def _is_cve_id(value: str) -> bool:
+    return _CVE_PART_PATTERN.fullmatch(value.strip()) is not None
+
+
+def _normalize_cve_id(value: str) -> str:
+    match = _CVE_PART_PATTERN.search(value.strip())
+    if not match:
+        return value.strip().upper().replace("_", "-")
+    return f"CVE-{match.group(1)}-{match.group(2)}"
+
+
+def _environment_candidate_sort_key(candidate: dict[str, Any]) -> tuple[int, str, str]:
+    return (
+        int(candidate.get("priority", 100)),
+        str(candidate.get("provider", "")),
+        str(candidate.get("compose_file") or candidate.get("image_name") or candidate.get("scenario_name") or ""),
+    )
+
+
+def _ensure_environment_repositories() -> dict[str, Any]:
+    if not getattr(cfg, "environment_repo_auto_clone", True):
+        return {"success": True, "results": [], "errors": []}
+
+    results = [_ensure_vulhub_repository()]
+    for name, path, url in (
+        ("Reapoc", getattr(cfg, "reapoc_dir", ""), "https://github.com/cckuailong/reapoc.git"),
+        (
+            "vulnerability-poc",
+            getattr(cfg, "vulnerability_poc_dir", ""),
+            "https://github.com/fankh/vulnerability-poc.git",
+        ),
+        ("Metarget", getattr(cfg, "metarget_dir", ""), "https://github.com/Metarget/metarget.git"),
+    ):
+        if path:
+            results.append(_ensure_git_repository(name, Path(path).expanduser(), url))
+    errors = [str(item.get("error")) for item in results if not item.get("success") and item.get("error")]
+    return {"success": not errors, "results": results, "errors": errors}
+
+
+def _ensure_vulhub_repository() -> dict[str, Any]:
+    """Download Vulhub once when local mode needs it and it is not present."""
+    return _ensure_git_repository(
+        "Vulhub",
+        Path(cfg.vulhub_dir).expanduser(),
+        "https://github.com/vulhub/vulhub.git",
+    )
+
+
+def _ensure_git_repository(name: str, root: Path, url: str) -> dict[str, Any]:
+    if root.is_dir():
+        return {"success": True, "downloaded": False, "path": str(root), "provider": name}
+
+    git = shutil.which("git")
+    if not git:
+        return {"success": False, "error": "未找到 git，无法自动下载 Vulhub"}
+
+    root.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        proc = subprocess.run(
+            [git, "-c", "http.version=HTTP/1.1", "clone", "--depth", "1", url, str(root)],
+            capture_output=True,
+            text=True,
+            timeout=900,
+            check=False,
+        )
+    except Exception as exc:
+        return {"success": False, "error": f"{name} 自动下载失败: {exc}", "provider": name}
+    if proc.returncode != 0:
+        error = proc.stderr.strip() or proc.stdout.strip() or f"git clone 返回 {proc.returncode}"
+        return {"success": False, "error": f"{name} 自动下载失败: {error}", "provider": name}
+    _compose_index_cache.pop(str(root.resolve()), None)
+    return {"success": True, "downloaded": True, "path": str(root), "provider": name}
+
+
+def _compose_candidate(
+    path: Path,
+    *,
+    source: str,
+    reason: str,
+    provider: str = "compose",
+    fidelity: str = "unknown",
+    priority: int = 100,
+) -> dict[str, Any]:
     path = path.resolve()
-    target_url = cfg.attack_env_target_url or _guess_target_url_from_compose(path)
+    # compose 自动推断的地址优先（本地 Docker）；ATTACK_ENV_TARGET_URL 仅作回退
+    target_url = _guess_target_url_from_compose(path) or cfg.attack_env_target_url
     return {
         "source": source,
+        "provider": provider,
+        "launcher": "docker_compose",
+        "fidelity": fidelity,
+        "priority": priority,
         "kind": "docker_compose",
         "compose_file": str(path),
         "workdir": str(path.parent),
@@ -453,10 +647,336 @@ def _compose_candidate(path: Path, *, source: str, reason: str) -> dict[str, Any
     }
 
 
+def _discover_vulfocus_candidates(cve_id: str) -> list[dict[str, Any]]:
+    api_url = str(getattr(cfg, "vulfocus_api_url", "") or "").strip()
+    username = str(getattr(cfg, "vulfocus_username", "") or "").strip()
+    licence = str(getattr(cfg, "vulfocus_licence", "") or "").strip()
+    if not (api_url and username and licence):
+        return []
+
+    normalized = _normalize_cve_id(cve_id)
+    candidates = []
+    for image in _load_vulfocus_images(api_url, username, licence):
+        text = " ".join(str(image.get(key) or "") for key in ("image_name", "image_vul_name", "image_desc"))
+        if normalized not in {_normalize_cve_id(match.group(0)) for match in _CVE_PART_PATTERN.finditer(text)}:
+            continue
+        image_name = str(image.get("image_name") or "").strip()
+        if not image_name:
+            continue
+        candidates.append({
+            "source": "vulfocus_api",
+            "provider": "vulfocus",
+            "launcher": "vulfocus_api",
+            "fidelity": "published_image",
+            "priority": 15,
+            "kind": "vulfocus_image",
+            "image_name": image_name,
+            "target_url": "",
+            "target_host": "",
+            "workdir": "",
+            "reason": f"Vulfocus 镜像命中: {image_name}",
+        })
+    return candidates
+
+
+def _load_vulfocus_images(api_url: str, username: str, licence: str) -> list[dict[str, Any]]:
+    key = (api_url.rstrip("/"), username)
+    if key in _vulfocus_image_cache:
+        return _vulfocus_image_cache[key]
+
+    endpoint = f"{api_url.rstrip('/')}/api/imgs/operation"
+    try:
+        with httpx.Client(
+            timeout=getattr(cfg, "request_timeout", 30),
+            proxy=getattr(cfg, "httpx_proxy", None),
+        ) as client:
+            response = client.get(endpoint, params={"username": username, "licence": licence})
+            response.raise_for_status()
+            payload = response.json()
+        images = payload.get("data") if str(payload.get("status")) == "200" else []
+        result = [item for item in images or [] if isinstance(item, dict)]
+    except Exception:
+        result = []
+    _vulfocus_image_cache[key] = result
+    return result
+
+
+def _discover_metarget_candidates(cve_id: str) -> list[dict[str, Any]]:
+    root_value = str(getattr(cfg, "metarget_dir", "") or "").strip()
+    if not root_value:
+        return []
+    root = Path(root_value).expanduser()
+    if not root.is_dir():
+        return []
+
+    normalized = _normalize_cve_id(cve_id)
+    slug = normalized.lower()
+    candidates = []
+    for manifest in sorted(root.glob(f"vulns_cn/**/{slug}.yaml")):
+        candidates.append(_metarget_candidate(root, manifest, normalized, "metarget_cnv", slug, 50))
+
+    for manifest in sorted(root.glob("vulns_app/**/desc.yaml")):
+        if normalized not in {_normalize_cve_id(part) for part in manifest.parts if _is_cve_id(part)}:
+            continue
+        try:
+            data = yaml.safe_load(manifest.read_text(encoding="utf-8", errors="ignore")) or {}
+        except Exception:
+            data = {}
+        scenario_name = str(data.get("name") or slug)
+        candidates.append(_metarget_candidate(
+            root,
+            manifest,
+            normalized,
+            "metarget_appv",
+            scenario_name,
+            45,
+        ))
+    return candidates
+
+
+def _metarget_candidate(
+    root: Path,
+    manifest: Path,
+    cve_id: str,
+    launcher: str,
+    scenario_name: str,
+    priority: int,
+) -> dict[str, Any]:
+    target_url = str(getattr(cfg, "metarget_target_url", "") or "").strip()
+    return {
+        "source": "metarget_local",
+        "provider": "metarget",
+        "launcher": launcher,
+        "fidelity": "infrastructure" if launcher == "metarget_cnv" else "real_product",
+        "priority": priority,
+        "kind": "metarget_scenario",
+        "scenario_name": scenario_name,
+        "manifest_file": str(manifest.resolve()),
+        "workdir": str(root.resolve()),
+        "target_url": target_url,
+        "target_host": _target_host_from_url(target_url) if target_url else "",
+        "reason": f"Metarget {launcher.removeprefix('metarget_')} 场景命中 {cve_id}",
+    }
+
+
+def _select_environment_candidate(environment: dict[str, Any], candidate: dict[str, Any]) -> None:
+    environment.update(candidate)
+    target_url = str(environment.get("target_url") or "")
+    environment["target_host"] = _target_host_from_url(target_url) if target_url else ""
+    environment["setup_mode"] = str(candidate.get("launcher") or "not_required")
+
+
+def _start_environment_candidates(
+    candidates: list[dict[str, Any]],
+) -> tuple[dict[str, Any] | None, dict[str, Any]]:
+    attempts = []
+    for candidate in candidates:
+        result = _start_environment_candidate(candidate)
+        attempts.append({
+            "provider": candidate.get("provider", ""),
+            "source": candidate.get("source", ""),
+            "launcher": candidate.get("launcher", ""),
+            "success": bool(result.get("success")),
+            "error": str(result.get("error") or ""),
+        })
+        if result.get("success"):
+            return candidate, {**result, "attempts": attempts}
+
+    errors = [attempt["error"] for attempt in attempts if attempt["error"]]
+    return (candidates[0] if candidates else None), {
+        "success": False,
+        "error": "；".join(dict.fromkeys(errors)) or "所有环境候选启动失败",
+        "attempts": attempts,
+    }
+
+
+def _start_environment_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
+    launcher = str(candidate.get("launcher") or "docker_compose")
+    if launcher == "docker_compose":
+        return _start_compose_environment(candidate)
+    if launcher in {"metarget_cnv", "metarget_appv"}:
+        return _start_metarget_environment(candidate)
+    if launcher == "vulfocus_api":
+        return _start_vulfocus_environment(candidate)
+    return {"success": False, "error": f"不支持的环境启动器: {launcher}"}
+
+
+def _start_metarget_environment(candidate: dict[str, Any]) -> dict[str, Any]:
+    if not getattr(cfg, "metarget_execution_enabled", False):
+        return {"success": False, "error": "Metarget 执行未授权，请设置 METARGET_EXECUTION_ENABLED=true"}
+    if platform.system() != "Linux":
+        return {"success": False, "error": "Metarget 只能在专用 Linux/Ubuntu 靶机上执行"}
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return {"success": False, "error": "Metarget 需要 root 权限"}
+
+    root = Path(str(candidate.get("workdir") or ""))
+    executable = root / "metarget"
+    if not executable.is_file():
+        return {"success": False, "error": f"Metarget 启动器不存在: {executable}"}
+
+    scenario_name = str(candidate.get("scenario_name") or "")
+    if candidate.get("launcher") == "metarget_appv":
+        command = [str(executable), "appv", "install", scenario_name, "--external", "--verbose"]
+    else:
+        command = [str(executable), "cnv", "install", scenario_name, "--verbose"]
+    result = _run_environment_command(command, cwd=root, timeout=3600)
+    if result["returncode"] != 0:
+        return {"success": False, "error": result["stderr"] or result["stdout"], "commands": [result]}
+    return {
+        "success": True,
+        "commands": [result],
+        "target_url": str(candidate.get("target_url") or ""),
+    }
+
+
+def _start_vulfocus_environment(candidate: dict[str, Any]) -> dict[str, Any]:
+    api_url = str(getattr(cfg, "vulfocus_api_url", "") or "").strip()
+    username = str(getattr(cfg, "vulfocus_username", "") or "").strip()
+    licence = str(getattr(cfg, "vulfocus_licence", "") or "").strip()
+    if not (api_url and username and licence):
+        return {"success": False, "error": "Vulfocus API 地址或认证信息未配置"}
+
+    endpoint = f"{api_url.rstrip('/')}/api/imgs/operation"
+    try:
+        with httpx.Client(
+            timeout=max(getattr(cfg, "request_timeout", 30), 30),
+            proxy=getattr(cfg, "httpx_proxy", None),
+        ) as client:
+            response = client.post(endpoint, data={
+                "username": username,
+                "licence": licence,
+                "image_name": candidate.get("image_name", ""),
+                "requisition": "start",
+            })
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        return {"success": False, "error": f"Vulfocus API 调用失败: {exc}"}
+    if str(payload.get("status")) != "200" or not isinstance(payload.get("data"), dict):
+        return {"success": False, "error": f"Vulfocus 启动失败: {payload.get('msg', '未知错误')}"}
+
+    target_url = _target_url_from_vulfocus(payload["data"], api_url)
+    if not target_url:
+        return {"success": False, "error": "Vulfocus 已启动镜像，但响应中没有可用端口"}
+    return {"success": True, "target_url": target_url, "api_response": payload}
+
+
+def _target_url_from_vulfocus(data: dict[str, Any], api_url: str) -> str:
+    try:
+        ports = json.loads(data.get("port") or "{}")
+    except (TypeError, ValueError):
+        ports = {}
+    if not isinstance(ports, dict) or not ports:
+        return ""
+
+    ranked = []
+    for order, (container_port, published_port) in enumerate(ports.items()):
+        port_spec = f"{published_port}:{container_port}"
+        ranked.append((_compose_port_score("web", port_spec), order, str(container_port), str(published_port)))
+    _, _, container_port, published_port = sorted(ranked)[0]
+    host = urlparse(api_url if "://" in api_url else f"http://{api_url}").hostname or "127.0.0.1"
+    scheme = "https" if container_port in {"443", "8443", "9443"} else "http"
+    return f"{scheme}://{host}:{published_port}"
+
+
+def _run_environment_command(command: list[str], *, cwd: Path, timeout: int) -> dict[str, Any]:
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=str(cwd),
+            text=True,
+            capture_output=True,
+            timeout=timeout,
+            check=False,
+        )
+        return {
+            "cmd": command,
+            "returncode": proc.returncode,
+            "stdout": proc.stdout[-2000:],
+            "stderr": proc.stderr[-2000:],
+        }
+    except Exception as exc:
+        return {"cmd": command, "returncode": -1, "stdout": "", "stderr": str(exc)}
+
+
+def _ensure_docker_running(timeout: int = 300) -> tuple[bool, str]:
+    """确保 Docker 守护进程在运行。Windows 上自动启动 Docker Desktop。
+
+    Returns:
+        (ok, message) — ok=True 表示 docker daemon 已就绪。
+    """
+    if _docker_daemon_alive():
+        return True, "Docker 守护进程已在运行"
+
+    system = platform.system()
+    if system != "Windows":
+        return False, "Docker 守护进程未运行，请手动启动 Docker"
+
+    # Windows: 尝试启动 Docker Desktop
+    docker_exe = _find_docker_desktop_executable()
+
+    if not docker_exe:
+        return False, "未找到 Docker Desktop 安装路径，请手动启动 Docker"
+
+    try:
+        subprocess.Popen(
+            [str(docker_exe)],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+    except Exception as exc:
+        return False, f"启动 Docker Desktop 失败: {exc}"
+
+    # 轮询等待 docker daemon 就绪
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _docker_daemon_alive():
+            return True, "Docker Desktop 已自动启动并就绪"
+        time.sleep(5)
+
+    return False, f"Docker Desktop 已启动但在 {timeout}s 内未就绪"
+
+
+def _find_docker_desktop_executable() -> Path | None:
+    """查找默认目录或 docker CLI 所属安装目录中的 Docker Desktop。"""
+    candidates = [
+        Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Docker" / "Docker" / "Docker Desktop.exe",
+        Path(os.environ.get("LOCALAPPDATA", "")) / "Docker" / "Docker Desktop.exe",
+    ]
+    docker_cli = shutil.which("docker")
+    if docker_cli:
+        cli_path = Path(docker_cli).resolve()
+        candidates.extend(parent / "Docker Desktop.exe" for parent in cli_path.parents)
+
+    return next((path for path in candidates if path.is_file()), None)
+
+
+def _docker_daemon_alive() -> bool:
+    """通过执行 docker info 检查 docker daemon 是否可用。"""
+    docker = shutil.which("docker")
+    if not docker:
+        return False
+    try:
+        result = subprocess.run(
+            [docker, "info"],
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
 def _start_compose_environment(candidate: dict[str, Any]) -> dict[str, Any]:
     compose_file = candidate.get("compose_file", "")
     if not compose_file:
         return {"success": False, "error": "环境候选缺少 compose_file"}
+
+    # 确保 Docker 守护进程运行
+    docker_ok, docker_msg = _ensure_docker_running()
+    if not docker_ok:
+        return {"success": False, "error": docker_msg}
 
     command = _docker_compose_command()
     if not command:
@@ -466,33 +986,57 @@ def _start_compose_environment(candidate: dict[str, Any]) -> dict[str, Any]:
     if not compose_path.is_file():
         return {"success": False, "error": f"compose 文件不存在: {compose_file}"}
 
+    # pull 非必须（up -d 会自动拉取），失败不阻断。
     commands = [
-        [*command, "-f", str(compose_path), "pull"],
-        [*command, "-f", str(compose_path), "up", "-d"],
+        ([*command, "-f", str(compose_path), "pull"], False),
+        ([*command, "-f", str(compose_path), "up", "-d"], True),
     ]
     outputs = []
-    for cmd in commands:
-        try:
-            proc = subprocess.run(
-                cmd,
-                cwd=str(compose_path.parent),
-                text=True,
-                capture_output=True,
-                timeout=600,
-                check=False,
-            )
-        except Exception as exc:
-            return {"success": False, "error": str(exc), "commands": outputs}
-        outputs.append({
-            "cmd": cmd,
-            "returncode": proc.returncode,
-            "stdout": proc.stdout[-2000:],
-            "stderr": proc.stderr[-2000:],
-        })
-        if proc.returncode != 0:
-            return {"success": False, "error": proc.stderr.strip() or proc.stdout.strip(), "commands": outputs}
+    for cmd, required in commands:
+        result = _run_environment_command(cmd, cwd=compose_path.parent, timeout=600)
+        outputs.append(result)
+        if result["returncode"] != 0 and required:
+            return {
+                "success": False,
+                "error": result["stderr"] or result["stdout"],
+                "commands": outputs,
+            }
 
-    return {"success": True, "commands": outputs}
+    target_url = str(candidate.get("target_url") or "")
+    health_timeout = getattr(cfg, "environment_healthcheck_timeout", 90)
+    if target_url and _is_local_target_url(target_url) and not _wait_for_http_target(target_url, health_timeout):
+        cleanup = _run_environment_command(
+            [*command, "-f", str(compose_path), "down"],
+            cwd=compose_path.parent,
+            timeout=180,
+        )
+        outputs.append(cleanup)
+        return {
+            "success": False,
+            "error": f"compose 已启动，但目标 {target_url} 在 {health_timeout}s 内未就绪",
+            "commands": outputs,
+        }
+
+    return {"success": True, "commands": outputs, "target_url": target_url}
+
+
+def _is_local_target_url(url: str) -> bool:
+    host = (urlparse(url if "://" in url else f"http://{url}").hostname or "").lower()
+    return host in {"127.0.0.1", "localhost", "::1", "host.docker.internal"}
+
+
+def _wait_for_http_target(url: str, timeout: int) -> bool:
+    deadline = time.monotonic() + max(timeout, 0)
+    while time.monotonic() <= deadline:
+        try:
+            with httpx.Client(timeout=3, follow_redirects=False, trust_env=False) as client:
+                client.get(url)
+            return True
+        except Exception:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(2)
+    return False
 
 
 def _docker_compose_command() -> list[str] | None:
@@ -697,7 +1241,11 @@ def _dedupe_candidates(candidates: list[dict[str, Any]]) -> list[dict[str, Any]]
     for candidate in candidates:
         key = json.dumps({
             "kind": candidate.get("kind"),
+            "provider": candidate.get("provider"),
+            "launcher": candidate.get("launcher"),
             "compose_file": candidate.get("compose_file"),
+            "image_name": candidate.get("image_name"),
+            "scenario_name": candidate.get("scenario_name"),
             "target_url": candidate.get("target_url"),
         }, sort_keys=True, ensure_ascii=False)
         if key in seen:

@@ -2,9 +2,12 @@
 
 优先级：
   1. custom/  —— 自行验证保存的 PoC（含完整 HTTP 请求）
-  2. trickest-cve/ —— trickest/cve git submodule（PoC 目录与 GitHub 链接）
+  2. data/cve/pcaps —— 工作流导入的 PCAP 攻击报文
+  3. third_party/vulhub —— 本地靶场 README 中的复现请求
+  4. trickest-cve/ —— trickest/cve git submodule（PoC 目录与 GitHub 链接）
 
-对 trickest-cve 命中时，会尝试从关联 GitHub 仓库获取实际 PoC 代码。
+默认只做本地检索。若 LOCAL_KB_GITHUB_FETCH=true，trickest-cve 命中时才会
+继续尝试从关联 GitHub 仓库获取实际 PoC 代码。
 """
 
 from __future__ import annotations
@@ -35,6 +38,10 @@ def _kb_base() -> Path:
     return Path(cfg.poc_kb_dir)
 
 
+_pcap_index: dict[str, list[Path]] | None = None
+_vulhub_readme_index: dict[str, list[Path]] | None = None
+
+
 # ── 搜索 ──
 
 def search_local_kb(cve_id: str) -> dict:
@@ -62,12 +69,22 @@ def search_local_kb(cve_id: str) -> dict:
             result["kb_path"] = str(custom_file)
             return result
 
-    # 2) trickest-cve/ —— 外部 PoC 目录
+    # 2) 工作流导入 PCAP —— 从已有攻击报文反解 Raw HTTP
+    pcap_result = _search_pcap_kb(cve_id)
+    if pcap_result.get("raw_http"):
+        return pcap_result
+
+    # 3) 本地 Vulhub README —— 靶场说明里通常直接给出复现请求
+    vulhub_result = _search_vulhub_readme(cve_id)
+    if vulhub_result.get("raw_http"):
+        return vulhub_result
+
+    # 4) trickest-cve/ —— 外部 PoC 目录
     trickest_file = base / "trickest-cve" / year / filename
     if trickest_file.exists():
         content = trickest_file.read_text(encoding="utf-8")
         parsed = _parse_trickest_md(content, cve_id)
-        if parsed.get("github_repos"):
+        if parsed.get("github_repos") and getattr(cfg, "local_kb_github_fetch", False):
             # 尝试从关联 GitHub 仓库获取 PoC
             poc = _fetch_poc_from_github_repos(parsed["github_repos"], cve_id)
             if poc and (poc.get("raw_http") or poc.get("yaml_content")):
@@ -102,7 +119,7 @@ def _parse_custom_kb(content: str, cve_id: str) -> dict:
     # 提取 ```http ... ``` 代码块
     m = re.search(r"```(?:http)?\s*\n((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+[\s\S]*?)```", content)
     if m:
-        result["raw_http"] = m.group(1).strip()
+        result["raw_http"] = _normalize_raw_http_host(m.group(1).strip())
 
     # 提取 ```yaml ... ``` 代码块
     m = re.search(r"```(?:yaml|yml)?\s*\n(id:\s*[\s\S]*?)```", content)
@@ -110,6 +127,206 @@ def _parse_custom_kb(content: str, cve_id: str) -> dict:
         result["yaml_content"] = m.group(1).strip()
 
     return result
+
+
+def _search_vulhub_readme(cve_id: str) -> dict:
+    """从已接入本地环境源的 README 提取 Raw HTTP PoC。"""
+    for readme in _vulhub_readmes_for_cve(cve_id):
+        raw_http = _first_http_request(readme.read_text(encoding="utf-8", errors="ignore"))
+        if raw_http:
+            return {
+                "found": True,
+                "source": "local_kb_vulhub",
+                "kb_path": str(readme),
+                "raw_http": raw_http,
+                "yaml_content": "",
+                "references": [],
+                "content": "",
+            }
+    return {"found": False, "source": "local_kb_vulhub"}
+
+
+def _vulhub_readmes_for_cve(cve_id: str) -> list[Path]:
+    index = _build_vulhub_readme_index()
+    return index.get(cve_id.upper(), [])
+
+
+def _build_vulhub_readme_index() -> dict[str, list[Path]]:
+    global _vulhub_readme_index
+    if _vulhub_readme_index is not None:
+        return _vulhub_readme_index
+
+    index: dict[str, list[Path]] = {}
+    roots = [
+        getattr(cfg, "vulhub_dir", ""),
+        getattr(cfg, "reapoc_dir", ""),
+        getattr(cfg, "vulnerability_poc_dir", ""),
+    ]
+    compose_names = {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
+    for root_value in roots:
+        if not root_value:
+            continue
+        environment_root = Path(root_value).expanduser()
+        if not environment_root.is_dir():
+            continue
+        for compose_file in environment_root.rglob("*"):
+            if not compose_file.is_file() or compose_file.name not in compose_names:
+                continue
+            cve_dir = next(
+                (parent for parent in compose_file.parents if re.fullmatch(r"CVE-\d{4}-\d{4,7}", parent.name, re.IGNORECASE)),
+                None,
+            )
+            if cve_dir is None:
+                continue
+            readme_dirs = [compose_file.parent]
+            if cve_dir != compose_file.parent:
+                readme_dirs.append(cve_dir)
+            readmes = [
+                directory / name
+                for directory in readme_dirs
+                for name in ("README.zh-cn.md", "README.md", "README.txt")
+                if (directory / name).is_file()
+            ]
+            if readmes:
+                index.setdefault(cve_dir.name.upper(), []).extend(readmes)
+    _vulhub_readme_index = {cve: _dedupe_paths(paths) for cve, paths in index.items()}
+    return _vulhub_readme_index
+
+
+def _search_pcap_kb(cve_id: str) -> dict:
+    """从 data/cve/pcaps 中精确命中 CVE 文件名并提取 Raw HTTP PoC。"""
+    matches = _pcap_files_for_cve(cve_id)
+    for pcap_path in matches:
+        raw_http = _extract_raw_http_from_pcap(pcap_path)
+        if raw_http:
+            return {
+                "found": True,
+                "source": "local_kb_pcap",
+                "kb_path": str(pcap_path),
+                "raw_http": raw_http,
+                "yaml_content": "",
+                "references": [],
+                "content": "",
+            }
+    return {"found": False, "source": "local_kb_pcap"}
+
+
+def _pcap_files_for_cve(cve_id: str) -> list[Path]:
+    index = _build_pcap_index()
+    return index.get(cve_id.upper(), [])
+
+
+def _build_pcap_index() -> dict[str, list[Path]]:
+    global _pcap_index
+    if _pcap_index is not None:
+        return _pcap_index
+
+    pcap_root = Path(getattr(cfg, "local_kb_pcap_dir", "data/cve/pcaps")).expanduser()
+    index: dict[str, list[Path]] = {}
+    if pcap_root.is_dir():
+        for path in pcap_root.rglob("*"):
+            if not path.is_file() or path.suffix.lower() not in {".pcap", ".pcapng"}:
+                continue
+            match = re.search(r"CVE-\d{4}-\d{4,7}", path.name, re.IGNORECASE)
+            if not match:
+                match = re.search(r"CVE-\d{4}-\d{4,7}", str(path), re.IGNORECASE)
+            if match:
+                index.setdefault(match.group(0).upper(), []).append(path)
+    _pcap_index = {cve: sorted(paths) for cve, paths in index.items()}
+    return _pcap_index
+
+
+def _extract_raw_http_from_pcap(path: Path) -> str:
+    """流式读取 PCAP，提取第一个 HTTP 请求载荷。"""
+    try:
+        from scapy.all import Raw
+        from scapy.utils import PcapReader
+    except Exception:
+        return ""
+
+    try:
+        with PcapReader(str(path)) as reader:
+            for packet in reader:
+                if Raw not in packet:
+                    continue
+                payload = bytes(packet[Raw].load)
+                request = _extract_http_request_from_bytes(payload)
+                if request:
+                    return request
+    except Exception:
+        return ""
+    return ""
+
+
+def _extract_http_request_from_bytes(payload: bytes) -> str:
+    try:
+        text = payload.decode("iso-8859-1", errors="ignore")
+    except Exception:
+        return ""
+    match = re.search(
+        r"(?is)(GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+\s+HTTP/\d(?:\.\d)?\r?\n.*",
+        text,
+    )
+    if not match:
+        return ""
+    request_text = match.group(0)
+    header_end = request_text.find("\r\n\r\n")
+    sep_len = 4
+    if header_end < 0:
+        header_end = request_text.find("\n\n")
+        sep_len = 2
+    if header_end >= 0:
+        header_blob = request_text[: header_end + sep_len]
+        body = request_text[header_end + sep_len :]
+        content_length = _content_length(header_blob)
+        if content_length > 0:
+            request_text = header_blob + body[:content_length]
+        else:
+            request_text = header_blob
+    return _normalize_raw_http_host(request_text.strip())
+
+
+def _content_length(headers: str) -> int:
+    match = re.search(r"(?im)^Content-Length:\s*(\d+)\s*$", headers)
+    if not match:
+        return 0
+    try:
+        return int(match.group(1))
+    except ValueError:
+        return 0
+
+
+def _first_http_request(text: str) -> str:
+    requests = extract_http_requests(text)
+    return _normalize_raw_http_host(requests[0]) if requests else ""
+
+
+def _normalize_raw_http_host(raw_http: str) -> str:
+    """将提取出的请求统一绑定到运行时 target_host。"""
+    raw_http = raw_http.replace("\r\n", "\n").strip()
+    if not raw_http:
+        return ""
+    if re.search(r"(?im)^Host\s*:", raw_http):
+        raw_http = re.sub(r"(?im)^Host\s*:\s*.*$", "Host: {{TARGET_HOST}}", raw_http, count=1)
+    else:
+        lines = raw_http.split("\n")
+        if not lines:
+            return raw_http
+        raw_http = "\n".join([lines[0], "Host: {{TARGET_HOST}}", *lines[1:]]).strip()
+    return _drop_empty_body_content_length(raw_http)
+
+
+def _drop_empty_body_content_length(raw_http: str) -> str:
+    parts = raw_http.split("\n\n", 1)
+    if len(parts) == 2 and parts[1].strip():
+        return raw_http
+    header_blob = parts[0]
+    header_lines = [
+        line
+        for line in header_blob.split("\n")
+        if not re.match(r"(?i)^Content-Length\s*:", line.strip())
+    ]
+    return "\n".join(header_lines).strip()
 
 
 def _parse_trickest_md(content: str, cve_id: str) -> dict:
@@ -180,7 +397,7 @@ def _fetch_poc_from_github_repos(repos: list[dict], cve_id: str) -> dict[str, st
                 if resp.status_code == 200 and len(resp.text) > 100:
                     pocs = _extract_http_requests(resp.text, cve_id)
                     if pocs:
-                        return {"raw_http": pocs[0], "yaml_content": ""}
+                        return {"raw_http": _normalize_raw_http_host(pocs[0]), "yaml_content": ""}
                     if not yaml_candidate:
                         yaml_candidate = _extract_nuclei_yaml(resp.text, cve_id)
             except Exception:
@@ -303,6 +520,18 @@ def _dedupe_strings(values: list[str]) -> list[str]:
         if not value or value in seen:
             continue
         seen.add(value)
+        unique.append(value)
+    return unique
+
+
+def _dedupe_paths(values: list[Path]) -> list[Path]:
+    seen = set()
+    unique = []
+    for value in values:
+        key = str(value)
+        if key in seen:
+            continue
+        seen.add(key)
         unique.append(value)
     return unique
 

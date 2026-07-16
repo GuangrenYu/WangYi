@@ -9,6 +9,10 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
+import socket
+import ssl
+import subprocess
 import time
 import threading
 from datetime import datetime
@@ -18,6 +22,7 @@ from urllib.parse import urlparse
 import httpx
 
 from cve_hunter.config import cfg
+from cve_hunter.safety import is_local_lab_host
 
 
 def send_poc_and_capture(
@@ -25,6 +30,7 @@ def send_poc_and_capture(
     raw_http: str = "",
     target_url: str = "",
     nuclei_yaml: str = "",
+    cve_id: str = "",
 ) -> dict:
     """发送 PoC 并抓包。
 
@@ -32,17 +38,35 @@ def send_poc_and_capture(
     """
     if cfg.http2pcap_url:
         if nuclei_yaml:
-            return _send_via_http2pcap_nuclei(nuclei_yaml, target_url)
-        return _send_via_http2pcap(raw_http)
-    return _send_builtin(raw_http, target_url)
+            return _send_via_http2pcap_nuclei(nuclei_yaml, target_url, cve_id)
+        return _send_via_http2pcap(raw_http, cve_id)
+    return _send_builtin(raw_http, target_url, cve_id)
 
 
-def _send_via_http2pcap(raw_http: str) -> dict:
+def _is_local_raw_target(raw_http: str, target_url: str = "") -> bool:
+    host_header = _raw_header_value(raw_http.replace("\r\n", "\n"), "Host") if raw_http else ""
+    host = _hostname_only(host_header)
+    if not host and target_url:
+        host = urlparse(target_url if "://" in target_url else f"http://{target_url}").hostname or ""
+    return is_local_lab_host(host)
+
+
+def _hostname_only(host_header: str) -> str:
+    host_header = (host_header or "").strip()
+    if host_header.startswith("["):
+        end = host_header.find("]")
+        return host_header[1:end] if end != -1 else host_header.strip("[]")
+    if ":" in host_header:
+        return host_header.rsplit(":", 1)[0]
+    return host_header
+
+
+def _send_via_http2pcap(raw_http: str, cve_id: str = "") -> dict:
     """通过 http2pcap 服务发送原始 HTTP 请求。"""
     try:
         data = _post_http2pcap(
             "/api/http2pcap",
-            json={"raw_http": raw_http, "check_ips": True},
+            json={"raw_http": raw_http, "check_ips": True, "cve_id": cve_id},
             timeout=60,
         )
         return {
@@ -60,7 +84,7 @@ def _send_via_http2pcap(raw_http: str) -> dict:
         return {"success": False, "error": str(e)}
 
 
-def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str) -> dict:
+def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str, cve_id: str = "") -> dict:
     """通过 http2pcap 服务执行 nuclei PoC。"""
     try:
         data = _post_http2pcap(
@@ -69,6 +93,7 @@ def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str) -> dict:
                 "yaml_content": yaml_content,
                 "target_url": target_url or f"http://{cfg.target_ip}",
                 "check_ips": True,
+                "cve_id": cve_id,
             },
             timeout=120,
         )
@@ -105,10 +130,13 @@ def _post_http2pcap(path: str, *, json: dict, timeout: int) -> dict:
         ) from exc
 
 
-def _send_builtin(raw_http: str, target_url: str = "") -> dict:
+def _send_builtin(raw_http: str, target_url: str = "", cve_id: str = "") -> dict:
     """内置方式：解析 raw HTTP → httpx 发送 → 可选 scapy 抓包。"""
     if not raw_http and not target_url:
         return {"success": False, "error": "缺少 raw_http 或 target_url"}
+
+    if raw_http:
+        return _send_raw_http_socket(raw_http, target_url, cve_id=cve_id)
 
     parsed = _parse_raw_http(raw_http) if raw_http else None
 
@@ -167,6 +195,215 @@ def _send_builtin(raw_http: str, target_url: str = "") -> dict:
     return result
 
 
+def _send_raw_http_socket(
+    raw_http: str,
+    target_url: str = "",
+    *,
+    capture: bool = True,
+    cve_id: str = "",
+) -> dict:
+    """按原始 request-target 直发，避免 httpx 规范化 ../、# 等特殊路径。"""
+    request = raw_http.replace("\r\n", "\n").strip()
+    if not request:
+        return {"success": False, "error": "raw_http 为空"}
+
+    parsed_target = urlparse(target_url) if target_url else None
+    host_header = _raw_header_value(request, "Host")
+    if not host_header and parsed_target:
+        host_header = parsed_target.netloc
+        request = _insert_header_after_request_line(request, f"Host: {host_header}")
+    if not host_header:
+        return {"success": False, "error": "raw_http 缺少 Host 头"}
+
+    scheme = parsed_target.scheme if parsed_target and parsed_target.scheme else ("https" if host_header.endswith(":443") else "http")
+    connect_host, connect_port = _host_port(host_header, default_port=443 if scheme == "https" else 80)
+    if not connect_host:
+        return {"success": False, "error": f"无法解析 Host: {host_header}"}
+
+    request = _ensure_connection_close(request)
+    payload = request.replace("\n", "\r\n").encode("iso-8859-1", errors="ignore") + b"\r\n\r\n"
+
+    pcap_path = ""
+    capture_process = None
+    if capture:
+        try:
+            pcap_path, capture_process = _start_dumpcap_capture(connect_host, cve_id)
+        except Exception:
+            pcap_path = ""
+
+    try:
+        with socket.create_connection((connect_host, connect_port), timeout=cfg.request_timeout) as sock:
+            sock.settimeout(cfg.request_timeout)
+            if scheme == "https":
+                context = ssl.create_default_context()
+                with context.wrap_socket(sock, server_hostname=connect_host) as tls_sock:
+                    tls_sock.sendall(payload)
+                    response = _recv_all(tls_sock)
+            else:
+                sock.sendall(payload)
+                response = _recv_all(sock)
+        parsed = _parse_http_response(response)
+        result = {
+            "success": True,
+            "status_code": parsed["status_code"],
+            "body": parsed["body"][:2000],
+            "pcap_file_path": pcap_path,
+            "ips_matches": [],
+            "packet_count": 0,
+        }
+    except Exception as e:
+        result = {"success": False, "error": str(e), "pcap_file_path": pcap_path}
+    finally:
+        if capture_process:
+            time.sleep(0.8)
+            _stop_dumpcap_capture(capture_process)
+
+    if pcap_path:
+        result["packet_count"] = _pcap_packet_count(Path(pcap_path))
+
+    return result
+
+
+def _capture_output_path(host: str, cve_id: str = "", now: datetime | None = None) -> Path:
+    now = now or datetime.now()
+    output_dir = Path(cfg.pcap_output_dir) / ".pending" / now.strftime("%Y-%m-%d")
+    output_dir.mkdir(parents=True, exist_ok=True)
+    cve_label = cve_id.strip().upper() if re.fullmatch(r"CVE-\d{4}-\d{4,}", cve_id.strip(), re.I) else "capture"
+    return output_dir / f"{cve_label}.pcap"
+
+
+def finalize_capture(pcap_file_path: str, *, keep: bool) -> str:
+    """Promote a pending local capture on validation success, otherwise remove it."""
+    if not pcap_file_path:
+        return ""
+    path = Path(pcap_file_path)
+    root = Path(cfg.pcap_output_dir).resolve()
+    pending_root = (root / ".pending").resolve()
+    resolved = path.resolve()
+    if pending_root not in resolved.parents:
+        if not keep and (resolved == root or root in resolved.parents):
+            path.unlink(missing_ok=True)
+        return pcap_file_path if keep else ""
+    if not keep:
+        path.unlink(missing_ok=True)
+        return ""
+    relative = resolved.relative_to(pending_root)
+    final_path = root / relative.parent / "CVE.pcap"
+    final_path.parent.mkdir(parents=True, exist_ok=True)
+    path.replace(final_path)
+    return str(final_path)
+
+
+def _start_dumpcap_capture(host: str, cve_id: str = "") -> tuple[str, subprocess.Popen]:
+    dumpcap = os.getenv("DUMPCAP_PATH") or shutil.which("dumpcap")
+    if not dumpcap:
+        raise FileNotFoundError("未找到 dumpcap")
+    interface = os.getenv("CAPTURE_INTERFACE", r"\Device\NPF_Loopback" if os.name == "nt" else "any")
+    output_path = _capture_output_path(host, cve_id)
+    process = subprocess.Popen(
+        [dumpcap, "-q", "-i", interface, "-F", "pcap", "-w", str(output_path)],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    time.sleep(0.7)
+    if process.poll() is not None:
+        error = process.stderr.read().strip() if process.stderr else ""
+        raise RuntimeError(error or "dumpcap 未能启动")
+    return str(output_path), process
+
+
+def _stop_dumpcap_capture(process: subprocess.Popen) -> None:
+    if process.poll() is not None:
+        return
+    process.terminate()
+    try:
+        process.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        process.kill()
+        process.wait(timeout=2)
+
+
+def _pcap_packet_count(path: Path) -> int:
+    tshark = os.getenv("TSHARK_PATH") or shutil.which("tshark")
+    if not tshark or not path.is_file() or path.stat().st_size == 0:
+        return 0
+    result = subprocess.run(
+        [tshark, "-r", str(path), "-T", "fields", "-e", "frame.number"],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    return sum(1 for line in result.stdout.splitlines() if line.strip())
+
+
+def _raw_header_value(raw_http: str, name: str) -> str:
+    match = re.search(rf"(?im)^{re.escape(name)}\s*:\s*(.+?)\s*$", raw_http)
+    return match.group(1).strip() if match else ""
+
+
+def _insert_header_after_request_line(raw_http: str, header: str) -> str:
+    lines = raw_http.split("\n")
+    if not lines:
+        return raw_http
+    return "\n".join([lines[0], header, *lines[1:]])
+
+
+def _ensure_connection_close(raw_http: str) -> str:
+    if re.search(r"(?im)^Connection\s*:", raw_http):
+        return re.sub(r"(?im)^Connection\s*:\s*.*$", "Connection: close", raw_http, count=1)
+    parts = raw_http.split("\n\n", 1)
+    head = f"{parts[0]}\nConnection: close"
+    return "\n\n".join([head, parts[1]]) if len(parts) == 2 else head
+
+
+def _host_port(host_header: str, *, default_port: int) -> tuple[str, int]:
+    host_header = host_header.strip()
+    if host_header.startswith("["):
+        end = host_header.find("]")
+        if end != -1:
+            host = host_header[1:end]
+            rest = host_header[end + 1 :]
+            if rest.startswith(":"):
+                try:
+                    return host, int(rest[1:])
+                except ValueError:
+                    return host, default_port
+            return host, default_port
+    if ":" in host_header:
+        host, port_text = host_header.rsplit(":", 1)
+        try:
+            return host.strip(), int(port_text)
+        except ValueError:
+            return host_header, default_port
+    return host_header, default_port
+
+
+def _recv_all(sock: socket.socket) -> bytes:
+    chunks = []
+    while True:
+        try:
+            data = sock.recv(65536)
+        except socket.timeout:
+            break
+        if not data:
+            break
+        chunks.append(data)
+    return b"".join(chunks)
+
+
+def _parse_http_response(response: bytes) -> dict:
+    text = response.decode("iso-8859-1", errors="ignore")
+    head, _, body = text.partition("\r\n\r\n")
+    if not body:
+        head, _, body = text.partition("\n\n")
+    status_line = head.splitlines()[0] if head.splitlines() else ""
+    match = re.match(r"HTTP/\d(?:\.\d)?\s+(\d+)", status_line)
+    status_code = int(match.group(1)) if match else 0
+    return {"status_code": status_code, "body": body}
+
+
 def _parse_raw_http(raw_http: str) -> dict | None:
     """将原始 HTTP 报文字符串解析为请求组件。"""
     lines = raw_http.replace("\r\n", "\n").split("\n")
@@ -209,7 +446,7 @@ def _start_capture(host: str) -> tuple[str, threading.Thread, threading.Event]:
     """启动 scapy 后台抓包线程。"""
     from scapy.all import sniff, wrpcap
 
-    output_dir = Path(cfg.output_dir) / "pcap"
+    output_dir = Path(cfg.pcap_output_dir) / datetime.now().strftime("%Y-%m-%d")
     output_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     pcap_path = str(output_dir / f"{ts}_{host}.pcap")

@@ -1,4 +1,8 @@
 import unittest
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 from cve_hunter.tools import local_kb
 
@@ -36,6 +40,56 @@ http:
 
         self.assertIn("id: CVE-2018-3760", extracted)
         self.assertIn("http:", extracted)
+
+    def test_search_local_kb_extracts_vulhub_readme_without_github_fetch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            poc_kb = root / "poc_kb"
+            vulhub_dir = root / "vulhub"
+            readme_dir = vulhub_dir / "python" / "CVE-2024-23334"
+            readme_dir.mkdir(parents=True)
+            (readme_dir / "docker-compose.yml").write_text(
+                "services:\n  web:\n    image: test\n    ports:\n      - '8080:8080'\n",
+                encoding="utf-8",
+            )
+            (readme_dir / "README.zh-cn.md").write_text(
+                "```text\n"
+                "GET /static/../../../../../etc/passwd HTTP/1.1\n"
+                "Host: your-ip:8080\n"
+                "\n"
+                "```",
+                encoding="utf-8",
+            )
+            fake_cfg = SimpleNamespace(
+                poc_kb_dir=str(poc_kb),
+                vulhub_dir=str(vulhub_dir),
+                local_kb_pcap_dir=str(root / "pcaps"),
+                local_kb_github_fetch=False,
+            )
+
+            local_kb._pcap_index = None
+            local_kb._vulhub_readme_index = None
+            with patch("cve_hunter.tools.local_kb.cfg", fake_cfg):
+                result = local_kb.search_local_kb("CVE-2024-23334")
+
+        self.assertTrue(result["found"])
+        self.assertEqual(result["source"], "local_kb_vulhub")
+        self.assertIn("GET /static/../../../../../etc/passwd HTTP/1.1", result["raw_http"])
+        self.assertIn("Host: {{TARGET_HOST}}", result["raw_http"])
+        self.assertNotIn("Content-Length", result["raw_http"])
+
+    def test_extract_http_request_from_pcap_payload_normalizes_host(self):
+        payload = (
+            b"GET /poc HTTP/1.1\r\n"
+            b"Host: 10.0.0.1:8080\r\n"
+            b"User-Agent: test\r\n"
+            b"\r\n"
+        )
+
+        raw_http = local_kb._extract_http_request_from_bytes(payload)
+
+        self.assertIn("GET /poc HTTP/1.1", raw_http)
+        self.assertIn("Host: {{TARGET_HOST}}", raw_http)
 
 
 if __name__ == "__main__":

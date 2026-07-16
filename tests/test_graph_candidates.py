@@ -10,7 +10,7 @@ from cve_hunter.graph import (
     _next_attempt_or_phase_update,
     _raw_http_candidates,
     node_generate_report,
-    node_reflect_after_verify,
+    node_poc_from_refs,
     node_verify_poc,
 )
 from cve_hunter.state import CVEState
@@ -82,43 +82,27 @@ class GraphCandidateTests(unittest.TestCase):
         self.assertEqual(update["current_candidate_index"], 1)
         self.assertIn("/second", update["poc_raw_http"])
 
+    def test_local_kb_candidate_failure_routes_to_reference_analysis(self):
+        candidates = _raw_http_candidates([_raw("/first")], source="local_kb_vulhub")
+        state = CVEState(
+            poc_candidates=candidates,
+            current_candidate_index=0,
+            phases_tried=["local_kb_search"],
+        )
+
+        update = _next_attempt_or_phase_update(state)
+
+        self.assertEqual(update["current_phase"], "reference_analysis")
+
     def test_next_phase_after_candidates_are_exhausted(self):
         candidates = _raw_http_candidates([_raw("/first"), _raw("/second")], source="reference")
         state = CVEState(
             poc_candidates=candidates,
             current_candidate_index=1,
-            phases_tried=["local_kb_search", "poc_from_refs"],
+            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs"],
         )
 
         update = _next_attempt_or_phase_update(state)
-
-        self.assertEqual(update["current_phase"], "nuclei_search")
-
-    def test_exhausted_candidates_can_route_to_reflection(self):
-        candidates = _raw_http_candidates([_raw("/first")], source="reference")
-        state = CVEState(
-            poc_candidates=candidates,
-            current_candidate_index=0,
-            poc_raw_http=candidates[0]["raw_http"],
-            phases_tried=["local_kb_search", "poc_from_refs"],
-        )
-
-        update = _next_attempt_or_phase_update(state, allow_reflection=True)
-
-        self.assertEqual(update["current_phase"], "reflect_after_verify")
-
-    def test_reflection_round_limit_routes_to_next_phase(self):
-        candidates = _raw_http_candidates([_raw("/first")], source="reference")
-        state = CVEState(
-            poc_candidates=candidates,
-            current_candidate_index=0,
-            poc_raw_http=candidates[0]["raw_http"],
-            reflection_rounds=2,
-            max_reflection_rounds=2,
-            phases_tried=["local_kb_search", "poc_from_refs"],
-        )
-
-        update = _next_attempt_or_phase_update(state, allow_reflection=True)
 
         self.assertEqual(update["current_phase"], "nuclei_search")
 
@@ -155,7 +139,7 @@ class GraphCandidateTests(unittest.TestCase):
             current_candidate_index=0,
             poc_source="reference",
             poc_raw_http=candidates[0]["raw_http"],
-            phases_tried=["local_kb_search", "poc_from_refs"],
+            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs"],
         )
 
         with (
@@ -188,7 +172,7 @@ class GraphCandidateTests(unittest.TestCase):
             current_candidate_index=0,
             poc_source="reference",
             poc_raw_http=candidates[0]["raw_http"],
-            phases_tried=["local_kb_search", "poc_from_refs"],
+            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs"],
         )
 
         with (
@@ -209,67 +193,19 @@ class GraphCandidateTests(unittest.TestCase):
         self.assertEqual(update["current_phase"], "nuclei_search")
         self.assertEqual(update["attempt_history"][0]["outcome"], "request_failed")
 
-    def test_reflection_node_appends_variant_candidate(self):
-        candidates = _raw_http_candidates([_raw("/first")], source="reference", confidence=0.7)
+    def test_poc_from_refs_defensively_runs_reference_analysis_first(self):
         state = CVEState(
             cve_id="CVE-2024-0001",
-            nvd_description="test vuln",
-            affected_products=["product"],
-            vuln_type="rce",
-            poc_candidates=candidates,
-            current_candidate_index=0,
-            poc_source="reference",
-            poc_raw_http=candidates[0]["raw_http"],
-            http_status_code=404,
-            http_response_body="not found",
-            attempt_history=[{"outcome": "http_success_no_ips"}],
-            phases_tried=["local_kb_search", "poc_from_refs"],
+            nvd_references=["https://example.com/advisory"],
+            reference_contents=[],
+            phases_tried=["local_kb_search"],
         )
-        llm_output = """{
-          "candidates": [
-            {
-              "method": "GET",
-              "path": "/variant",
-              "headers": {"Host": "{{TARGET_HOST}}"},
-              "confidence": 0.6,
-              "reason": "try alternate path"
-            }
-          ]
-        }"""
 
-        with (
-            patch("cve_hunter.graph.console.quiet", True),
-            patch("cve_hunter.graph.invoke_llm", return_value=llm_output),
-        ):
-            update = node_reflect_after_verify(state)
+        with patch("cve_hunter.graph.console.quiet", True):
+            update = node_poc_from_refs(state)
 
-        self.assertEqual(update["current_phase"], "verify_poc")
-        self.assertEqual(update["reflection_rounds"], 1)
-        self.assertEqual(update["current_candidate_index"], 1)
-        self.assertIn("/variant", update["poc_raw_http"])
-        self.assertIn("reflect_after_verify", update["phases_tried"])
-
-    def test_reflection_duplicate_candidate_falls_back_to_next_phase(self):
-        candidates = _raw_http_candidates([_raw("/first")], source="reference")
-        state = CVEState(
-            cve_id="CVE-2024-0001",
-            poc_candidates=candidates,
-            current_candidate_index=0,
-            poc_source="reference",
-            poc_raw_http=candidates[0]["raw_http"],
-            attempt_history=[{"outcome": "http_success_no_ips"}],
-            phases_tried=["local_kb_search", "poc_from_refs"],
-        )
-        llm_output = """{"candidates":[{"raw_http":"GET /first HTTP/1.1\\nHost: {{TARGET_HOST}}\\n\\n"}]}"""
-
-        with (
-            patch("cve_hunter.graph.console.quiet", True),
-            patch("cve_hunter.graph.invoke_llm", return_value=llm_output),
-        ):
-            update = node_reflect_after_verify(state)
-
-        self.assertEqual(update["current_phase"], "nuclei_search")
-        self.assertEqual(update["reflection_rounds"], 1)
+        self.assertEqual(update["current_phase"], "reference_analysis")
+        self.assertNotIn("phases_tried", update)
 
     def test_generate_report_prefers_execution_policy_blocked(self):
         with tempfile.TemporaryDirectory() as tmp:
