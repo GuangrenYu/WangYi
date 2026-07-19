@@ -91,6 +91,26 @@ def _print_rate_limit_retry(cve_id: str, delay: int, attempt: int) -> None:
     )
 
 
+def _request_nvd(cve_id: str, headers: dict[str, str]) -> httpx.Response:
+    proxies = [cfg.httpx_proxy, None] if cfg.httpx_proxy else [None]
+    last_error: httpx.RequestError | None = None
+    for proxy in proxies:
+        try:
+            return httpx.get(
+                NVD_API,
+                params={"cveId": cve_id},
+                headers=headers,
+                timeout=_NVD_TIMEOUT,
+                proxy=proxy,
+                trust_env=False,
+            )
+        except httpx.RequestError as exc:
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise RuntimeError("No NVD HTTP route available")
+
+
 def query_nvd(cve_id: str) -> dict:
     """查询 NVD 获取 CVE 详细信息（优先本地数据，回退 API）。
 
@@ -125,13 +145,7 @@ def _query_nvd_api(cve_id: str) -> dict:
     rate_limit_attempt = 0
     while True:
         try:
-            resp = httpx.get(
-                NVD_API,
-                params={"cveId": cve_id},
-                headers=headers,
-                timeout=_NVD_TIMEOUT,
-                proxy=cfg.httpx_proxy,
-            )
+            resp = _request_nvd(cve_id, headers)
             if _is_nvd_rate_limited(resp):
                 rate_limit_attempt += 1
                 if rate_limit_attempt > _NVD_RATE_LIMIT_MAX_ATTEMPTS:

@@ -19,13 +19,16 @@ deepseek-v4-pro。LLM 调用失败时会自动退回确定性规则，保持主�
 
 from __future__ import annotations
 
+import atexit
 import json
 import os
 import platform
 import re
 import shutil
+import socket
 import subprocess
 import time
+import uuid
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -41,9 +44,33 @@ from cve_hunter.state import CVEState
 
 
 _COMPOSE_NAMES = {"docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml"}
-_CVE_PART_PATTERN = re.compile(r"CVE[-_]([0-9]{4})[-_]([0-9]{4,7})", re.IGNORECASE)
+_CVE_PART_PATTERN = re.compile(
+    r"(?<![A-Z0-9])CVE[-_]([0-9]{4})[-_]([0-9]{4,7})(?![0-9])",
+    re.IGNORECASE,
+)
+_TCP_TARGET_PORTS = {
+    22, 25, 110, 143, 389, 445, 873, 1433, 1521, 1883, 2375, 3306,
+    5432, 5672, 6379, 9042, 9300, 11211, 27017, 61616,
+}
+_COMPOSE_INIT_SERVICE_PATTERN = re.compile(
+    r"(^|[-_])(init|initialize|migrate|migration|setup|bootstrap)([-_]|$)",
+    re.IGNORECASE,
+)
 _compose_index_cache: dict[str, dict[str, list[Path]]] = {}
 _vulfocus_image_cache: dict[tuple[str, str], list[dict[str, Any]]] = {}
+# Compose projects created by this process that still need reclaim.
+# project_name -> absolute compose file path.
+_owned_compose_projects: dict[str, str] = {}
+_atexit_reclaim_registered = False
+
+
+def _register_atexit_reclaim() -> None:
+    """Register process-exit reclaim once so killed batches still release containers."""
+    global _atexit_reclaim_registered
+    if _atexit_reclaim_registered:
+        return
+    atexit.register(reclaim_owned_compose_projects)
+    _atexit_reclaim_registered = True
 
 
 def append_agent_trace(
@@ -78,7 +105,10 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
         bootstrap = _ensure_environment_repositories()
         bootstrap_errors = list(bootstrap.get("errors") or [])
 
-    candidates = _discover_environment_candidates(state.cve_id)
+    candidates = _discover_environment_candidates(
+        state.cve_id,
+        local_only=local_container_mode,
+    )
     environment = _default_environment()
     environment["local_container_mode"] = local_container_mode
     status = "planned"
@@ -224,6 +254,7 @@ def run_critic_agent(state: CVEState, candidate: dict[str, Any]) -> dict[str, An
 
     raw_http = enriched.get("raw_http", "")
     nuclei_yaml = enriched.get("nuclei_yaml", "")
+    execution_spec = enriched.get("execution_spec") if isinstance(enriched.get("execution_spec"), dict) else {}
     if raw_http:
         if "{{TARGET_HOST}}" not in raw_http and "Host:" not in raw_http:
             flags.append("raw_http_missing_host")
@@ -233,6 +264,17 @@ def run_critic_agent(state: CVEState, candidate: dict[str, Any]) -> dict[str, An
             score_delta -= 0.15
     elif nuclei_yaml:
         enriched.setdefault("validation_hint", {"type": "nuclei_match"})
+    elif execution_spec.get("protocol") == "database" and (
+        execution_spec.get("trigger_sql") or execution_spec.get("schema_sql") or execution_spec.get("setup_sql")
+    ):
+        enriched.setdefault("validation_hint", execution_spec.get("oracle") or {"type": "error_pattern"})
+        if not enriched.get("attack_objective"):
+            enriched["attack_objective"] = "database_exploit"
+    elif execution_spec.get("protocol"):
+        # 非 HTTP 接口候选：有协议但未必可执行
+        if not (execution_spec.get("trigger_sql") or execution_spec.get("raw_http")):
+            flags.append("candidate_has_no_executable_payload")
+            score_delta -= 0.3
     else:
         flags.append("candidate_has_no_executable_payload")
         score_delta -= 0.3
@@ -451,7 +493,11 @@ def _merge_llm_critic_review(
     return enriched, merged_review
 
 
-def _discover_environment_candidates(cve_id: str) -> list[dict[str, Any]]:
+def _discover_environment_candidates(
+    cve_id: str,
+    *,
+    local_only: bool = False,
+) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     explicit = Path(cfg.attack_env_compose_file).expanduser() if cfg.attack_env_compose_file else None
     if explicit and explicit.is_file():
@@ -462,6 +508,7 @@ def _discover_environment_candidates(cve_id: str) -> list[dict[str, Any]]:
             fidelity="user_supplied",
             priority=0,
             reason="ATTACK_ENV_COMPOSE_FILE 指定",
+            local_only=local_only,
         ))
 
     for spec in _configured_compose_roots():
@@ -474,6 +521,7 @@ def _discover_environment_candidates(cve_id: str) -> list[dict[str, Any]]:
                 fidelity=spec["fidelity"],
                 priority=spec["priority"],
                 reason=spec["reason"],
+                local_only=local_only,
             ))
 
     candidates.extend(_discover_vulfocus_candidates(cve_id))
@@ -531,7 +579,11 @@ def _compose_index_for_root(root: Path) -> dict[str, list[Path]]:
                 continue
             relative_parts = path.relative_to(root).parts[:-1]
             cve_id = next(
-                (_normalize_cve_id(part) for part in reversed(relative_parts) if _is_cve_id(part)),
+                (
+                    _normalize_cve_id(part)
+                    for part in reversed(relative_parts)
+                    if _CVE_PART_PATTERN.search(part)
+                ),
                 "",
             )
             if cve_id:
@@ -628,10 +680,14 @@ def _compose_candidate(
     provider: str = "compose",
     fidelity: str = "unknown",
     priority: int = 100,
+    local_only: bool = False,
 ) -> dict[str, Any]:
     path = path.resolve()
     # compose 自动推断的地址优先（本地 Docker）；ATTACK_ENV_TARGET_URL 仅作回退
     target_url = _guess_target_url_from_compose(path) or cfg.attack_env_target_url
+    target_url = target_url or _default_target_url()
+    if local_only and not _is_local_target_url(target_url):
+        target_url = ""
     return {
         "source": source,
         "provider": provider,
@@ -641,8 +697,8 @@ def _compose_candidate(
         "kind": "docker_compose",
         "compose_file": str(path),
         "workdir": str(path.parent),
-        "target_url": target_url or _default_target_url(),
-        "target_host": _target_host_from_url(target_url or _default_target_url()),
+        "target_url": target_url,
+        "target_host": _target_host_from_url(target_url) if target_url else "",
         "reason": reason,
     }
 
@@ -770,24 +826,47 @@ def _start_environment_candidates(
     candidates: list[dict[str, Any]],
 ) -> tuple[dict[str, Any] | None, dict[str, Any]]:
     attempts = []
+    last_owned_result: dict[str, Any] | None = None
+    last_owned_candidate: dict[str, Any] | None = None
     for candidate in candidates:
         result = _start_environment_candidate(candidate)
-        attempts.append({
+        attempt = {
             "provider": candidate.get("provider", ""),
             "source": candidate.get("source", ""),
             "launcher": candidate.get("launcher", ""),
             "success": bool(result.get("success")),
             "error": str(result.get("error") or ""),
-        })
+            "project_name": result.get("project_name", ""),
+            "started_by_orchestrator": bool(result.get("started_by_orchestrator")),
+            "cleanup_result": result.get("cleanup_result"),
+        }
+        attempts.append(attempt)
         if result.get("success"):
             return candidate, {**result, "attempts": attempts}
+        # Preserve ownership metadata from residual failed starts so final
+        # teardown can reclaim containers when intermediate cleanup failed.
+        if result.get("started_by_orchestrator"):
+            last_owned_result = result
+            last_owned_candidate = candidate
 
     errors = [attempt["error"] for attempt in attempts if attempt["error"]]
-    return (candidates[0] if candidates else None), {
+    failure: dict[str, Any] = {
         "success": False,
         "error": "；".join(dict.fromkeys(errors)) or "所有环境候选启动失败",
         "attempts": attempts,
     }
+    if last_owned_result:
+        failure["started_by_orchestrator"] = True
+        failure["project_name"] = last_owned_result.get("project_name", "")
+        if last_owned_result.get("cleanup_result") is not None:
+            failure["cleanup_result"] = last_owned_result.get("cleanup_result")
+        if last_owned_result.get("commands") is not None:
+            failure["commands"] = last_owned_result.get("commands")
+        if last_owned_result.get("healthcheck") is not None:
+            failure["healthcheck"] = last_owned_result.get("healthcheck")
+        if last_owned_result.get("initialization") is not None:
+            failure["initialization"] = last_owned_result.get("initialization")
+    return (last_owned_candidate or (candidates[0] if candidates else None)), failure
 
 
 def _start_environment_candidate(candidate: dict[str, Any]) -> dict[str, Any]:
@@ -824,6 +903,7 @@ def _start_metarget_environment(candidate: dict[str, Any]) -> dict[str, Any]:
         return {"success": False, "error": result["stderr"] or result["stdout"], "commands": [result]}
     return {
         "success": True,
+        "started_by_orchestrator": True,
         "commands": [result],
         "target_url": str(candidate.get("target_url") or ""),
     }
@@ -858,7 +938,12 @@ def _start_vulfocus_environment(candidate: dict[str, Any]) -> dict[str, Any]:
     target_url = _target_url_from_vulfocus(payload["data"], api_url)
     if not target_url:
         return {"success": False, "error": "Vulfocus 已启动镜像，但响应中没有可用端口"}
-    return {"success": True, "target_url": target_url, "api_response": payload}
+    return {
+        "success": True,
+        "started_by_orchestrator": True,
+        "target_url": target_url,
+        "api_response": payload,
+    }
 
 
 def _target_url_from_vulfocus(data: dict[str, Any], api_url: str) -> str:
@@ -879,21 +964,34 @@ def _target_url_from_vulfocus(data: dict[str, Any], api_url: str) -> str:
     return f"{scheme}://{host}:{published_port}"
 
 
-def _run_environment_command(command: list[str], *, cwd: Path, timeout: int) -> dict[str, Any]:
+def _run_environment_command(
+    command: list[str],
+    *,
+    cwd: Path,
+    timeout: int,
+    output_limit: int | None = 2000,
+) -> dict[str, Any]:
     try:
         proc = subprocess.run(
             command,
             cwd=str(cwd),
             text=True,
+            encoding="utf-8",
+            errors="replace",
             capture_output=True,
             timeout=timeout,
             check=False,
         )
+        stdout = proc.stdout or ""
+        stderr = proc.stderr or ""
+        if output_limit is not None:
+            stdout = stdout[-output_limit:]
+            stderr = stderr[-output_limit:]
         return {
             "cmd": command,
             "returncode": proc.returncode,
-            "stdout": proc.stdout[-2000:],
-            "stderr": proc.stderr[-2000:],
+            "stdout": stdout,
+            "stderr": stderr,
         }
     except Exception as exc:
         return {"cmd": command, "returncode": -1, "stdout": "", "stderr": str(exc)}
@@ -986,38 +1084,379 @@ def _start_compose_environment(candidate: dict[str, Any]) -> dict[str, Any]:
     if not compose_path.is_file():
         return {"success": False, "error": f"compose 文件不存在: {compose_file}"}
 
-    # pull 非必须（up -d 会自动拉取），失败不阻断。
-    commands = [
-        ([*command, "-f", str(compose_path), "pull"], False),
-        ([*command, "-f", str(compose_path), "up", "-d"], True),
-    ]
-    outputs = []
-    for cmd, required in commands:
-        result = _run_environment_command(cmd, cwd=compose_path.parent, timeout=600)
-        outputs.append(result)
-        if result["returncode"] != 0 and required:
-            return {
-                "success": False,
-                "error": result["stderr"] or result["stdout"],
-                "commands": outputs,
-            }
+    project_name = str(candidate.get("compose_project_name") or _new_compose_project_name(compose_path))
+    compose_args = [*command, "-p", project_name, "-f", str(compose_path)]
 
-    target_url = str(candidate.get("target_url") or "")
-    health_timeout = getattr(cfg, "environment_healthcheck_timeout", 90)
-    if target_url and _is_local_target_url(target_url) and not _wait_for_http_target(target_url, health_timeout):
-        cleanup = _run_environment_command(
-            [*command, "-f", str(compose_path), "down"],
-            cwd=compose_path.parent,
-            timeout=180,
-        )
-        outputs.append(cleanup)
+    ownership_check = _run_environment_command(
+        [*compose_args, "ps", "--all", "-q"],
+        cwd=compose_path.parent,
+        timeout=60,
+    )
+    if ownership_check["returncode"] != 0:
         return {
             "success": False,
-            "error": f"compose 已启动，但目标 {target_url} 在 {health_timeout}s 内未就绪",
-            "commands": outputs,
+            "error": ownership_check["stderr"] or ownership_check["stdout"],
+            "project_name": project_name,
+            "commands": [ownership_check],
+        }
+    if ownership_check["stdout"].strip():
+        return {
+            "success": False,
+            "error": f"独立 Compose 项目已存在容器，拒绝接管: {project_name}",
+            "project_name": project_name,
+            "preexisting_environment": True,
+            "commands": [ownership_check],
         }
 
-    return {"success": True, "commands": outputs, "target_url": target_url}
+    outputs = [ownership_check]
+    owned = False
+
+    def _failed_result(
+        error: str,
+        *,
+        initialization: dict[str, Any] | None = None,
+        healthcheck: dict[str, Any] | None = None,
+        cleanup: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        payload: dict[str, Any] = {
+            "success": False,
+            "error": error,
+            "project_name": project_name,
+            "commands": outputs,
+            # Keep ownership when containers may still exist so final report
+            # teardown / reclaim_owned_compose_projects() can force release.
+            "started_by_orchestrator": owned and not bool((cleanup or {}).get("success")),
+            "preexisting_environment": False,
+        }
+        if initialization is not None:
+            payload["initialization"] = initialization
+        if healthcheck is not None:
+            payload["healthcheck"] = healthcheck
+        if cleanup is not None:
+            payload["cleanup_result"] = cleanup
+        return payload
+
+    # 已缓存镜像不访问 registry；缺失镜像仍尝试拉取，失败不阻断后续诊断。
+    pull_result = _run_environment_command(
+        [*compose_args, "pull", "--policy", "missing"],
+        cwd=compose_path.parent,
+        timeout=600,
+    )
+    outputs.append(pull_result)
+
+    health_timeout = getattr(cfg, "environment_healthcheck_timeout", 90)
+    init_services = _compose_init_services(compose_path)
+    initialization: dict[str, Any] | None = None
+    if init_services:
+        init_up = _run_environment_command(
+            [*compose_args, "up", "-d", *init_services],
+            cwd=compose_path.parent,
+            timeout=600,
+        )
+        outputs.append(init_up)
+        # Even a failed `up` may create partial networks/containers for this
+        # project name; claim ownership so reclaim always runs.
+        register_owned_compose_project(project_name, compose_path)
+        owned = True
+        if init_up["returncode"] != 0:
+            cleanup = _cleanup_compose_project(command, compose_path, project_name)
+            outputs.append(cleanup)
+            return _failed_result(
+                init_up["stderr"] or init_up["stdout"],
+                cleanup=cleanup,
+            )
+        initialization = _wait_for_compose_init(
+            command,
+            compose_path,
+            project_name,
+            init_services,
+            health_timeout,
+        )
+        if not initialization["success"]:
+            cleanup = _cleanup_compose_project(command, compose_path, project_name)
+            outputs.append(cleanup)
+            return _failed_result(
+                initialization["error"],
+                initialization=initialization,
+                cleanup=cleanup,
+            )
+
+    all_services = _compose_service_names(compose_path)
+    main_services = [service for service in all_services if service not in init_services]
+    if main_services or not init_services:
+        main_up_command = [*compose_args, "up", "-d"]
+        if init_services:
+            main_up_command.extend(main_services)
+        up_result = _run_environment_command(
+            main_up_command,
+            cwd=compose_path.parent,
+            timeout=600,
+        )
+        outputs.append(up_result)
+        register_owned_compose_project(project_name, compose_path)
+        owned = True
+        if up_result["returncode"] != 0:
+            cleanup = _cleanup_compose_project(command, compose_path, project_name)
+            outputs.append(cleanup)
+            return _failed_result(
+                up_result["stderr"] or up_result["stdout"],
+                initialization=initialization,
+                cleanup=cleanup,
+            )
+
+    target_url = str(candidate.get("target_url") or "")
+    compose_healthchecks = _compose_healthcheck_services(compose_path)
+    target_services = _compose_target_services(compose_path, target_url)
+    required_healthchecks = compose_healthchecks
+    if target_services:
+        required_healthchecks = [
+            service for service in compose_healthchecks if service in target_services
+        ]
+    healthcheck = _environment_healthcheck(
+        command=command,
+        compose_path=compose_path,
+        project_name=project_name,
+        compose_services=required_healthchecks,
+        observed_compose_services=compose_healthchecks,
+        target_url=target_url,
+        timeout=health_timeout,
+    )
+    if not healthcheck["success"]:
+        cleanup = _cleanup_compose_project(command, compose_path, project_name)
+        outputs.append(cleanup)
+        return _failed_result(
+            healthcheck["error"],
+            initialization=initialization,
+            healthcheck=healthcheck,
+            cleanup=cleanup,
+        )
+
+    return {
+        "success": True,
+        "started_by_orchestrator": True,
+        "preexisting_environment": False,
+        "project_name": project_name,
+        "commands": outputs,
+        "target_url": target_url,
+        "initialization": initialization,
+        "healthcheck": healthcheck,
+    }
+
+
+def register_owned_compose_project(project_name: str, compose_file: str | Path) -> None:
+    """Track a Compose project created by this process for forced reclaim."""
+    name = str(project_name or "").strip()
+    path = str(compose_file or "").strip()
+    if name and path:
+        _owned_compose_projects[name] = str(Path(path))
+        _register_atexit_reclaim()
+
+
+def unregister_owned_compose_project(project_name: str) -> None:
+    """Drop ownership tracking after a successful reclaim."""
+    _owned_compose_projects.pop(str(project_name or "").strip(), None)
+
+
+def list_owned_compose_projects() -> dict[str, str]:
+    """Return a copy of Compose projects still owned by this process."""
+    return dict(_owned_compose_projects)
+
+
+def reclaim_owned_compose_projects() -> list[dict[str, Any]]:
+    """Force-stop every Compose project still owned by this process.
+
+    Used as a final safety net after each CVE run so healthcheck failures,
+    partial ups, or unexpected exceptions cannot leave containers behind.
+    """
+    results: list[dict[str, Any]] = []
+    if not _owned_compose_projects:
+        return results
+
+    command = _docker_compose_command()
+    for project_name, compose_file in list(_owned_compose_projects.items()):
+        compose_path = Path(compose_file)
+        if not command:
+            results.append({
+                "success": False,
+                "project_name": project_name,
+                "compose_file": compose_file,
+                "error": "未找到 docker compose 或 docker-compose 命令",
+            })
+            continue
+        if not compose_path.is_file():
+            unregister_owned_compose_project(project_name)
+            results.append({
+                "success": True,
+                "project_name": project_name,
+                "compose_file": compose_file,
+                "skipped": True,
+                "reason": "compose file missing; ownership cleared",
+            })
+            continue
+        output = _cleanup_compose_project(command, compose_path, project_name)
+        results.append({
+            "success": bool(output.get("success")),
+            "project_name": project_name,
+            "compose_file": compose_file,
+            "error": output.get("error", ""),
+            "commands": [output],
+        })
+    return results
+
+
+def teardown_environment(environment: dict[str, Any]) -> dict[str, Any]:
+    """Stop an environment that this workflow started and still owns.
+
+    Ownership is tracked with started_by_orchestrator. A failed healthcheck can
+    still leave containers running when intermediate cleanup fails; those
+    residual projects keep started_by_orchestrator=True so final report teardown
+    and reclaim_owned_compose_projects() can release them.
+    """
+    setup_result = environment.get("setup_result")
+    if not isinstance(setup_result, dict):
+        return _skipped_teardown("environment has no setup result")
+    if not setup_result.get("started_by_orchestrator"):
+        return _skipped_teardown("environment is not owned by this workflow")
+    if not getattr(cfg, "environment_auto_cleanup", True):
+        return _skipped_teardown("ENVIRONMENT_AUTO_CLEANUP=false")
+
+    launcher = str(environment.get("launcher") or environment.get("setup_mode") or "")
+    if launcher == "docker_compose":
+        result = _teardown_compose_environment(environment)
+    elif launcher == "vulfocus_api":
+        # Only fully successful Vulfocus starts are owned today.
+        if not setup_result.get("success"):
+            return _skipped_teardown("environment was not started successfully")
+        result = _teardown_vulfocus_environment(environment)
+    elif launcher in {"metarget_cnv", "metarget_appv"}:
+        if not setup_result.get("success"):
+            return _skipped_teardown("environment was not started successfully")
+        result = _teardown_metarget_environment(environment)
+    else:
+        result = {"success": False, "error": f"不支持的环境回收器: {launcher or 'unknown'}"}
+    return {**result, "skipped": False, "launcher": launcher}
+
+
+def _skipped_teardown(reason: str) -> dict[str, Any]:
+    return {"success": True, "skipped": True, "reason": reason}
+
+
+def _teardown_compose_environment(environment: dict[str, Any]) -> dict[str, Any]:
+    compose_file = str(environment.get("compose_file") or "")
+    if not compose_file:
+        return {"success": False, "error": "环境缺少 compose_file，无法回收"}
+    compose_path = Path(compose_file)
+    if not compose_path.is_file():
+        return {"success": False, "error": f"compose 文件不存在: {compose_file}"}
+    command = _docker_compose_command()
+    if not command:
+        return {"success": False, "error": "未找到 docker compose 或 docker-compose 命令"}
+
+    setup_result = environment.get("setup_result")
+    project_name = str(setup_result.get("project_name") or "") if isinstance(setup_result, dict) else ""
+    if not project_name:
+        return {"success": False, "error": "环境缺少独立 Compose project name，拒绝回收默认项目"}
+
+    output = _cleanup_compose_project(command, compose_path, project_name)
+    if output["returncode"] != 0:
+        return {
+            "success": False,
+            "error": output["stderr"] or output["stdout"],
+            "commands": [output],
+        }
+    return {"success": True, "project_name": project_name, "commands": [output]}
+
+
+def _new_compose_project_name(compose_path: Path) -> str:
+    label = re.sub(r"[^a-z0-9_-]+", "-", compose_path.parent.name.lower()).strip("-_")
+    label = label[:32] or "environment"
+    return f"cvehunter-{label}-{uuid.uuid4().hex[:8]}"
+
+
+def _cleanup_compose_project(
+    command: list[str],
+    compose_path: Path,
+    project_name: str,
+) -> dict[str, Any]:
+    result = _run_environment_command(
+        [
+            *command,
+            "-p",
+            project_name,
+            "-f",
+            str(compose_path),
+            "down",
+            "--remove-orphans",
+            "--volumes",
+        ],
+        cwd=compose_path.parent,
+        timeout=300,
+    )
+    success = result["returncode"] == 0
+    if success:
+        unregister_owned_compose_project(project_name)
+    return {
+        **result,
+        "success": success,
+        "error": "" if success else (result["stderr"] or result["stdout"]),
+    }
+
+
+def _teardown_vulfocus_environment(environment: dict[str, Any]) -> dict[str, Any]:
+    api_url = str(getattr(cfg, "vulfocus_api_url", "") or "").strip()
+    username = str(getattr(cfg, "vulfocus_username", "") or "").strip()
+    licence = str(getattr(cfg, "vulfocus_licence", "") or "").strip()
+    image_name = str(environment.get("image_name") or "").strip()
+    if not (api_url and username and licence and image_name):
+        return {"success": False, "error": "Vulfocus API 地址、认证信息或镜像名缺失"}
+
+    endpoint = f"{api_url.rstrip('/')}/api/imgs/operation"
+    try:
+        with httpx.Client(
+            timeout=max(getattr(cfg, "request_timeout", 30), 30),
+            proxy=getattr(cfg, "httpx_proxy", None),
+        ) as client:
+            response = client.post(endpoint, data={
+                "username": username,
+                "licence": licence,
+                "image_name": image_name,
+                "requisition": "stop",
+            })
+            response.raise_for_status()
+            payload = response.json()
+    except Exception as exc:
+        return {"success": False, "error": f"Vulfocus API 调用失败: {exc}"}
+    if str(payload.get("status")) != "200":
+        return {"success": False, "error": f"Vulfocus 停止失败: {payload.get('msg', '未知错误')}"}
+    return {"success": True, "api_response": payload}
+
+
+def _teardown_metarget_environment(environment: dict[str, Any]) -> dict[str, Any]:
+    if not getattr(cfg, "metarget_execution_enabled", False):
+        return {"success": False, "error": "Metarget 执行未授权，无法自动回收"}
+    if platform.system() != "Linux":
+        return {"success": False, "error": "Metarget 只能在专用 Linux/Ubuntu 靶机上回收"}
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return {"success": False, "error": "Metarget 回收需要 root 权限"}
+
+    root = Path(str(environment.get("workdir") or ""))
+    executable = root / "metarget"
+    if not executable.is_file():
+        return {"success": False, "error": f"Metarget 启动器不存在: {executable}"}
+    scenario_name = str(environment.get("scenario_name") or "")
+    subcommand = "appv" if environment.get("launcher") == "metarget_appv" else "cnv"
+    output = _run_environment_command(
+        [str(executable), subcommand, "remove", scenario_name, "--verbose"],
+        cwd=root,
+        timeout=3600,
+    )
+    if output["returncode"] != 0:
+        return {
+            "success": False,
+            "error": output["stderr"] or output["stdout"],
+            "commands": [output],
+        }
+    return {"success": True, "commands": [output]}
 
 
 def _is_local_target_url(url: str) -> bool:
@@ -1037,6 +1476,326 @@ def _wait_for_http_target(url: str, timeout: int) -> bool:
                 break
             time.sleep(2)
     return False
+
+
+def _wait_for_tcp_target(url: str, timeout: int) -> bool:
+    parsed = urlparse(url if "://" in url else f"tcp://{url}")
+    host = parsed.hostname or ""
+    port = parsed.port
+    if not host or port is None:
+        return False
+    deadline = time.monotonic() + max(timeout, 0)
+    while time.monotonic() <= deadline:
+        try:
+            with socket.create_connection((host, port), timeout=3):
+                return True
+        except OSError:
+            if time.monotonic() >= deadline:
+                break
+            time.sleep(2)
+    return False
+
+
+def _compose_service_definitions(compose_path: Path) -> dict[str, dict[str, Any]]:
+    try:
+        data = yaml.safe_load(compose_path.read_text(encoding="utf-8", errors="ignore")) or {}
+    except Exception:
+        return {}
+    services = data.get("services") if isinstance(data, dict) else None
+    if not isinstance(services, dict):
+        return {}
+    return {
+        str(name): service
+        for name, service in services.items()
+        if isinstance(service, dict)
+    }
+
+
+def _compose_service_names(compose_path: Path) -> list[str]:
+    return list(_compose_service_definitions(compose_path))
+
+
+def _compose_init_services(compose_path: Path) -> list[str]:
+    return [
+        name
+        for name in _compose_service_definitions(compose_path)
+        if _COMPOSE_INIT_SERVICE_PATTERN.search(name)
+    ]
+
+
+def _compose_healthcheck_services(compose_path: Path) -> list[str]:
+    result = []
+    for name, service in _compose_service_definitions(compose_path).items():
+        healthcheck = service.get("healthcheck")
+        if healthcheck and not (isinstance(healthcheck, dict) and healthcheck.get("disable")):
+            result.append(name)
+    return result
+
+
+def _compose_target_services(compose_path: Path, target_url: str) -> list[str]:
+    if not target_url:
+        return []
+    parsed = urlparse(target_url if "://" in target_url else f"http://{target_url}")
+    try:
+        target_port = parsed.port
+    except ValueError:
+        return []
+    if target_port is None:
+        target_port = 443 if parsed.scheme.lower() == "https" else 80
+
+    result = []
+    for name, service in _compose_service_definitions(compose_path).items():
+        if any(_published_port(port) == str(target_port) for port in service.get("ports") or []):
+            result.append(name)
+    return result
+
+
+def _environment_healthcheck(
+    *,
+    command: list[str],
+    compose_path: Path,
+    project_name: str,
+    compose_services: list[str],
+    observed_compose_services: list[str],
+    target_url: str,
+    timeout: int,
+) -> dict[str, Any]:
+    if compose_services:
+        compose_result = _wait_for_compose_health(
+            command,
+            compose_path,
+            project_name,
+            compose_services,
+            timeout,
+            observed_services=observed_compose_services,
+        )
+        success = compose_result["success"]
+        service_health = compose_result["service_health"]
+        status_summary = ", ".join(
+            f"{service}={service_health.get(service, 'missing')}"
+            for service in compose_services
+        )
+        return {
+            "success": success,
+            "type": "compose",
+            "services": compose_services,
+            "observed_services": observed_compose_services,
+            "service_health": service_health,
+            "status_error": compose_result.get("status_error", ""),
+            "error": "" if success else (
+                f"compose 已启动，但服务健康检查在 {timeout}s 内未通过: "
+                f"{status_summary}"
+            ),
+        }
+
+    if not target_url or not _is_local_target_url(target_url):
+        return {"success": True, "type": "none", "target": target_url, "error": ""}
+
+    check_type = _target_healthcheck_type(target_url)
+    if check_type == "tcp":
+        success = _wait_for_tcp_target(target_url, timeout)
+    else:
+        success = _wait_for_http_target(target_url, timeout)
+    return {
+        "success": success,
+        "type": check_type,
+        "target": target_url,
+        "error": "" if success else (
+            f"compose 已启动，但 {check_type.upper()} 目标 {target_url} "
+            f"在 {timeout}s 内未就绪"
+        ),
+    }
+
+
+def _target_healthcheck_type(target_url: str) -> str:
+    parsed = urlparse(target_url if "://" in target_url else f"http://{target_url}")
+    scheme = parsed.scheme.lower()
+    if scheme in {"tcp", "mysql", "postgres", "postgresql", "mariadb", "mongodb", "redis"}:
+        return "tcp"
+    if parsed.port in _TCP_TARGET_PORTS or parsed.port in {5433, 3307, 27018}:
+        return "tcp"
+    return "http"
+
+
+def _wait_for_compose_init(
+    command: list[str],
+    compose_path: Path,
+    project_name: str,
+    services: list[str],
+    timeout: int,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + max(timeout, 0)
+    last_status: dict[str, dict[str, Any]] = {}
+    last_error = ""
+    while time.monotonic() <= deadline:
+        result = _run_environment_command(
+            [
+                *command,
+                "-p",
+                project_name,
+                "-f",
+                str(compose_path),
+                "ps",
+                "--all",
+                "--format",
+                "json",
+            ],
+            cwd=compose_path.parent,
+            timeout=30,
+            output_limit=None,
+        )
+        if result["returncode"] == 0:
+            last_status = _compose_service_status(result.get("stdout", ""))
+            last_error = ""
+        else:
+            last_error = result.get("stderr") or result.get("stdout") or "compose ps failed"
+
+        failed = [
+            service
+            for service in services
+            if last_status.get(service, {}).get("state") in {"dead", "exited"}
+            and last_status.get(service, {}).get("exit_code") != 0
+        ]
+        if failed:
+            summary = ", ".join(
+                f"{service}=exit:{last_status[service].get('exit_code')}"
+                for service in failed
+            )
+            return {
+                "success": False,
+                "services": services,
+                "service_status": last_status,
+                "status_error": last_error,
+                "error": f"Compose 初始化服务执行失败: {summary}",
+            }
+        if services and all(
+            last_status.get(service, {}).get("state") in {"dead", "exited"}
+            and last_status.get(service, {}).get("exit_code") == 0
+            for service in services
+        ):
+            return {
+                "success": True,
+                "services": services,
+                "service_status": last_status,
+                "status_error": "",
+                "error": "",
+            }
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(2)
+
+    summary = ", ".join(
+        f"{service}={last_status.get(service, {}).get('state', 'missing')}"
+        for service in services
+    )
+    return {
+        "success": False,
+        "services": services,
+        "service_status": last_status,
+        "status_error": last_error,
+        "error": f"Compose 初始化服务在 {timeout}s 内未完成: {summary}",
+    }
+
+
+def _wait_for_compose_health(
+    command: list[str],
+    compose_path: Path,
+    project_name: str,
+    services: list[str],
+    timeout: int,
+    observed_services: list[str] | None = None,
+) -> dict[str, Any]:
+    deadline = time.monotonic() + max(timeout, 0)
+    expected = set(services)
+    observed = list(dict.fromkeys([*(observed_services or []), *services]))
+    last_health: dict[str, str] = {}
+    last_error = ""
+    while time.monotonic() <= deadline:
+        result = _run_environment_command(
+            [
+                *command,
+                "-p",
+                project_name,
+                "-f",
+                str(compose_path),
+                "ps",
+                "--all",
+                "--format",
+                "json",
+            ],
+            cwd=compose_path.parent,
+            timeout=30,
+            output_limit=None,
+        )
+        if result["returncode"] == 0:
+            last_health = _compose_service_health(result.get("stdout", ""))
+            last_error = ""
+        else:
+            last_error = result.get("stderr") or result.get("stdout") or "compose ps failed"
+        if expected and all(last_health.get(service) == "healthy" for service in expected):
+            return {
+                "success": True,
+                "service_health": {
+                    service: last_health.get(service, "missing") for service in observed
+                },
+                "status_error": "",
+            }
+        if time.monotonic() >= deadline:
+            break
+        time.sleep(2)
+    return {
+        "success": False,
+        "service_health": {
+            service: last_health.get(service, "missing") for service in observed
+        },
+        "status_error": last_error,
+    }
+
+
+def _compose_service_health(output: str) -> dict[str, str]:
+    result = {}
+    for record in _compose_ps_records(output):
+        service = str(record.get("Service") or record.get("service") or "")
+        if not service:
+            continue
+        health = str(record.get("Health") or record.get("health") or "").lower()
+        state = str(record.get("State") or record.get("state") or "").lower()
+        result[service] = health or (f"state:{state}" if state else "none")
+    return result
+
+
+def _compose_service_status(output: str) -> dict[str, dict[str, Any]]:
+    result = {}
+    for record in _compose_ps_records(output):
+        service = str(record.get("Service") or record.get("service") or "")
+        if not service:
+            continue
+        state = str(record.get("State") or record.get("state") or "").lower()
+        exit_code_value = record.get("ExitCode")
+        if exit_code_value is None:
+            exit_code_value = record.get("exit_code")
+        try:
+            exit_code = int(exit_code_value)
+        except (TypeError, ValueError):
+            exit_code = None
+        result[service] = {"state": state, "exit_code": exit_code}
+    return result
+
+
+def _compose_ps_records(output: str) -> list[dict[str, Any]]:
+    if not output.strip():
+        return []
+    try:
+        payload = json.loads(output)
+        records = payload if isinstance(payload, list) else [payload]
+    except json.JSONDecodeError:
+        records = []
+        for line in output.splitlines():
+            try:
+                records.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    return [record for record in records if isinstance(record, dict)]
 
 
 def _docker_compose_command() -> list[str] | None:
@@ -1074,8 +1833,19 @@ def _guess_target_url_from_compose(path: Path) -> str:
                 ))
                 order += 1
     if candidates:
-        _, _, published = sorted(candidates)[0]
-        return f"http://127.0.0.1:{published}"
+        best = sorted(candidates)[0]
+        _, _, published = best
+        # 数据库类服务用 tcp://，避免对 5432/3306 做 HTTP 健康检查。
+        scheme = "tcp" if best[0] >= 40 else "http"
+        # best[0] is score; high score means redis/postgres/mysql-like.
+        # Recompute scheme from published/target port for robustness.
+        try:
+            published_int = int(str(published))
+        except (TypeError, ValueError):
+            published_int = -1
+        if published_int in _TCP_TARGET_PORTS or published_int in {5433, 3307, 27018}:
+            scheme = "tcp"
+        return f"{scheme}://127.0.0.1:{published}"
     return ""
 
 

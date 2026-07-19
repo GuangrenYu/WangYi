@@ -23,15 +23,18 @@ from cve_hunter.ips_match import classify_ips_matches, summarize_ips_classificat
 from cve_hunter.state import CVEState
 from cve_hunter.status_codes import (
     CAPTURE_SUCCESS,
+    DB_ORACLE_SUCCESS,
     EXECUTION_POLICY_BLOCKED,
     IPS_GENERIC_MATCH_ONLY,
     NO_EXPLOIT_EVIDENCE,
+    PROTOCOL_UNSUPPORTED,
     TARGET_ORACLE_FAILED,
     TARGET_ORACLE_SUCCESS,
     status_description,
 )
 from cve_hunter.safety import evaluate_execution_policy
 from cve_hunter.tools.http_sender import send_poc_and_capture
+from cve_hunter.executors.base import PROTOCOL_DATABASE, PROTOCOL_HTTP, execute_spec
 
 
 @dataclass
@@ -92,6 +95,27 @@ class RequestExecutor:
                 step_results=[],
             )
 
+        # 数据库 / 非 HTTP 结构化执行规格优先
+        execution_spec = candidate.get("execution_spec")
+        if isinstance(execution_spec, dict) and execution_spec.get("protocol"):
+            protocol = str(execution_spec.get("protocol") or "").strip().lower()
+            if protocol == PROTOCOL_DATABASE:
+                result = execute_spec(execution_spec, environment, cve_id=cve_id)
+                # 将 request_success 统一为“触发阶段已执行”
+                if result.get("phase") in {"oracle", "trigger_sql"} or result.get("logs"):
+                    result.setdefault("request_success", True)
+                return _with_executor_metadata(
+                    result,
+                    self.name,
+                    target_url,
+                    target_host,
+                    step_results=list(result.get("logs") or []),
+                )
+            if protocol not in {PROTOCOL_HTTP, ""}:
+                result = execute_spec(execution_spec, environment, cve_id=cve_id)
+                result.setdefault("status_code", PROTOCOL_UNSUPPORTED)
+                return _with_executor_metadata(result, self.name, target_url, target_host, step_results=[])
+
         if candidate.get("request_steps"):
             return self._execute_steps(candidate["request_steps"], target_url, target_host, cve_id)
 
@@ -105,12 +129,12 @@ class RequestExecutor:
 
         raw_http = candidate.get("raw_http", "")
         if raw_http:
-            raw_http = raw_http.replace("{{TARGET_HOST}}", target_host)
+            raw_http = _prepare_raw_http(raw_http, target_host)
             result = send_poc_and_capture(raw_http=raw_http, cve_id=cve_id)
             return _with_executor_metadata(result, self.name, target_url, target_host, request_raw=raw_http, step_results=[])
 
         return _with_executor_metadata(
-            {"success": False, "error": "候选缺少 raw_http、nuclei_yaml 或 request_steps"},
+            {"success": False, "error": "候选缺少 raw_http、nuclei_yaml、request_steps 或 execution_spec"},
             self.name,
             target_url,
             target_host,
@@ -121,7 +145,10 @@ class RequestExecutor:
         step_results = []
         last_result: dict[str, Any] = {"success": False, "error": "request_steps 为空"}
         for index, step in enumerate(steps, start=1):
-            raw_http = str(step.get("raw_http") or step.get("request") or "").replace("{{TARGET_HOST}}", target_host)
+            raw_http = _prepare_raw_http(
+                str(step.get("raw_http") or step.get("request") or ""),
+                target_host,
+            )
             nuclei_yaml = str(step.get("nuclei_yaml") or "")
             if nuclei_yaml:
                 result = send_poc_and_capture(nuclei_yaml=nuclei_yaml, target_url=target_url, cve_id=cve_id)
@@ -161,6 +188,11 @@ class SuccessOracle:
         request_success = bool(result.get("success", False))
         target_success = bool(target_oracle.get("success", False))
 
+        db_oracle = result.get("oracle") if isinstance(result.get("oracle"), dict) else {}
+        db_success = bool(db_oracle.get("success")) or (
+            str(result.get("protocol") or "") == "database" and bool(result.get("success"))
+        )
+
         if result.get("policy_blocked"):
             outcome = "execution_policy_blocked"
             final_status = "FAILURE"
@@ -173,6 +205,19 @@ class SuccessOracle:
             status_code = CAPTURE_SUCCESS
             message = status_description(CAPTURE_SUCCESS)
             success_level = "ips_cve_match"
+        elif db_success:
+            outcome = "database_oracle_success"
+            final_status = "SUCCESS"
+            status_code = str(result.get("status_code") or DB_ORACLE_SUCCESS)
+            message = status_description(DB_ORACLE_SUCCESS)
+            success_level = "database_oracle"
+            target_oracle = {
+                "evaluated": True,
+                "success": True,
+                "type": db_oracle.get("type") or "database",
+                "evidence": db_oracle.get("evidence") or result.get("body") or "",
+            }
+            target_success = True
         elif target_success:
             outcome = "target_oracle_success"
             final_status = "SUCCESS"
@@ -200,7 +245,7 @@ class SuccessOracle:
         else:
             outcome = "request_failed"
             final_status = "FAILURE"
-            status_code = ""
+            status_code = str(result.get("status_code") or "")
             message = result.get("error", "请求失败")
             success_level = "request_failed"
 
@@ -358,3 +403,36 @@ def _default_target_url() -> str:
 def _target_host_from_url(url: str) -> str:
     parsed = urlparse(url if "://" in url else f"http://{url}")
     return parsed.netloc or parsed.path or cfg.target_ip
+
+
+def _prepare_raw_http(raw_http: str, target_host: str) -> str:
+    """Replace TARGET_HOST placeholders and inject Host when missing.
+
+    Some LLM/reference candidates omit the Host header. The local http2pcap
+    service rejects those as non-local (`unknown`), so fill Host from the
+    current environment target before sending.
+    """
+    text = str(raw_http or "")
+    if not text.strip():
+        return text
+    host = str(target_host or "").strip()
+    if host:
+        text = text.replace("{{TARGET_HOST}}", host).replace("{{target_host}}", host)
+
+    normalized = text.replace("\r\n", "\n")
+    if not host:
+        return normalized.replace("\n", "\r\n") if "\r\n" not in text else text
+
+    # Already has a Host header (after placeholder replacement).
+    for line in normalized.split("\n"):
+        if line.lower().startswith("host:"):
+            value = line.split(":", 1)[1].strip()
+            if value and "{{" not in value:
+                return normalized.replace("\n", "\r\n") if "\r\n" not in text else text
+
+    # Insert Host after the request line, or at the top if malformed.
+    lines = normalized.split("\n")
+    insert_at = 1 if lines else 0
+    lines.insert(insert_at, f"Host: {host}")
+    rebuilt = "\n".join(lines)
+    return rebuilt.replace("\n", "\r\n")

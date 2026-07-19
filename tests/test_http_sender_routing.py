@@ -26,6 +26,23 @@ class HttpSenderRoutingTests(unittest.TestCase):
             self.assertEqual(result, "")
             self.assertFalse(pending.exists())
 
+    def test_failed_retry_does_not_overwrite_existing_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            final = Path(tmp) / "2026-07-15" / "CVE-2024-23334.pcap"
+            final.parent.mkdir(parents=True)
+            final.write_bytes(b"successful capture")
+            pending = Path(tmp) / ".pending" / "2026-07-15" / "CVE-2024-23334.pcap"
+            pending.parent.mkdir(parents=True)
+            pending.write_bytes(b"failed retry")
+            fake_cfg = SimpleNamespace(pcap_output_dir=tmp)
+
+            with patch.object(http_sender, "cfg", fake_cfg):
+                result = http_sender.finalize_capture(str(pending), keep=False)
+
+            self.assertEqual(result, "")
+            self.assertFalse(pending.exists())
+            self.assertEqual(final.read_bytes(), b"successful capture")
+
     def test_successful_capture_is_promoted(self):
         with tempfile.TemporaryDirectory() as tmp:
             pending = Path(tmp) / ".pending" / "2026-07-15" / "CVE-2024-23334.pcap"
@@ -34,7 +51,7 @@ class HttpSenderRoutingTests(unittest.TestCase):
             fake_cfg = SimpleNamespace(pcap_output_dir=tmp)
             with patch.object(http_sender, "cfg", fake_cfg):
                 result = http_sender.finalize_capture(str(pending), keep=True)
-            final = Path(tmp) / "2026-07-15" / "CVE.pcap"
+            final = Path(tmp) / "2026-07-15" / "CVE-2024-23334.pcap"
             self.assertEqual(Path(result), final)
             self.assertTrue(final.is_file())
 

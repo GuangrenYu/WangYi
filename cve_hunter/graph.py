@@ -34,6 +34,7 @@ from cve_hunter.agents import (
     run_critic_agent,
     run_environment_agent,
     run_trigger_agent,
+    teardown_environment,
 )
 from cve_hunter.poc_parser import extract_http_requests, parse_poc_candidates_json
 from cve_hunter.prompts.templates import (
@@ -48,18 +49,32 @@ from cve_hunter.tools.local_kb import search_local_kb, save_to_local_kb
 from cve_hunter.tools.web_search import search_web
 from cve_hunter.verification import evaluate_success, execute_candidate
 from cve_hunter.tools.http_sender import finalize_capture
+from cve_hunter.evidence import (
+    classify_failure,
+    derive_success_tier,
+    write_repro_bundle,
+)
 from cve_hunter.status_codes import (
     AI_REPRODUCTION_FAILED,
     CAPTURE_SUCCESS,
     EXECUTION_POLICY_BLOCKED,
+    HTTP2PCAP_SERVICE_FAILED,
+    HTTP_REQUEST_FAILED,
     INFRASTRUCTURE_FAILED,
     IPS_GENERIC_MATCH_ONLY,
     NOT_HTTP_VULN,
     PARAMETER_ERROR,
+    PCAP_CAPTURE_FAILED,
     POC_NOT_FOUND,
+    PROTOCOL_UNSUPPORTED,
     classify_error,
     make_status_update,
     status_description,
+)
+from cve_hunter.executors.base import (
+    PROTOCOL_DATABASE,
+    PROTOCOL_HTTP,
+    infer_protocol,
 )
 
 from rich.console import Console
@@ -192,13 +207,14 @@ def node_vuln_type_check(state: CVEState) -> dict:
         return {
             "is_http_vuln": True,
             "vuln_type": "未知",
+            "protocol": PROTOCOL_HTTP,
             "current_phase": "environment_agent",
             **_milestone_update(
                 state,
                 "http_classified",
                 "passed",
                 message="无 NVD 描述，按 HTTP/Web 继续",
-                data={"is_http_vuln": True, "vuln_type": "未知"},
+                data={"is_http_vuln": True, "vuln_type": "未知", "protocol": PROTOCOL_HTTP},
             ),
         }
 
@@ -210,38 +226,52 @@ def node_vuln_type_check(state: CVEState) -> dict:
         cvss_score=state.cvss_score,
         cvss_severity=state.cvss_severity,
     )
+    protocol = infer_protocol(
+        is_http_vuln=result.is_http_vuln,
+        vuln_type=result.vuln_type,
+        description=state.nvd_description,
+    )
     if result.error:
         console.print(f"  [yellow]⚠ {result.error}[/]")
         updates = {
             "is_http_vuln": result.is_http_vuln,
             "vuln_type": result.vuln_type,
-            "current_phase": "reference_analysis",
+            "protocol": protocol,
+            "current_phase": "reference_analysis" if result.is_http_vuln or protocol == PROTOCOL_DATABASE else "generate_report",
             "error_messages": state.error_messages + [result.error],
         }
         if "AI 判断" in result.error:
             hint = classify_error(result.error, source="llm")
             updates.update(make_status_update(state.status_code, hint.code, hint.message))
-        console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type}")
+        if not result.is_http_vuln and protocol != PROTOCOL_DATABASE:
+            updates.update(make_status_update(state.status_code, PROTOCOL_UNSUPPORTED, status_description(PROTOCOL_UNSUPPORTED)))
+        console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type} protocol={protocol}")
         updates["milestones"] = _mark_milestone_map(
             state.milestones,
             "http_classified",
             "failed" if "AI 判断" in result.error else "passed",
             message=result.error,
-            data={"is_http_vuln": result.is_http_vuln, "vuln_type": result.vuln_type},
+            data={"is_http_vuln": result.is_http_vuln, "vuln_type": result.vuln_type, "protocol": protocol},
         )
         return updates
-    console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type}")
-    return {
+    console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type} protocol={protocol}")
+    phase = "environment_agent"
+    updates = {
         "is_http_vuln": result.is_http_vuln,
         "vuln_type": result.vuln_type,
-        "current_phase": "environment_agent",
+        "protocol": protocol,
+        "current_phase": phase,
         **_milestone_update(
             state,
             "http_classified",
             "passed",
-            data={"is_http_vuln": result.is_http_vuln, "vuln_type": result.vuln_type},
+            data={"is_http_vuln": result.is_http_vuln, "vuln_type": result.vuln_type, "protocol": protocol},
         ),
     }
+    if not result.is_http_vuln and protocol != PROTOCOL_DATABASE:
+        updates.update(make_status_update(state.status_code, PROTOCOL_UNSUPPORTED, status_description(PROTOCOL_UNSUPPORTED)))
+        updates["current_phase"] = "generate_report"
+    return updates
 
 
 def node_environment_agent(state: CVEState) -> dict:
@@ -359,6 +389,52 @@ def node_local_kb_search(state: CVEState) -> dict:
                 ))
                 return updates
 
+            if result.get("execution_spec"):
+                console.print("  [green]✓ 提取到数据库 execution_spec[/]")
+                from cve_hunter.tools.db_spec import resolve_database_target
+                from urllib.parse import urlparse
+
+                spec = dict(result["execution_spec"])
+                engine = str(spec.get("engine") or "postgres")
+                env_target = (state.attack_environment or {}).get("target_url") or (
+                    state.attack_environment or {}
+                ).get("target_host") or ""
+                # 从已抽取 DSN 取账号库名，再用环境 host:port 覆盖地址
+                existing = str(spec.get("target") or "")
+                user, password, database = "postgres", "postgres", "postgres"
+                if engine.startswith("mysql"):
+                    user, password, database = "root", "", ""
+                if "://" in existing:
+                    parsed = urlparse(existing)
+                    user = parsed.username or user
+                    password = parsed.password if parsed.password is not None else password
+                    database = (parsed.path or "").lstrip("/") or database
+                if env_target:
+                    spec["target"] = resolve_database_target(
+                        engine=engine,
+                        env_target=str(env_target),
+                        user=user,
+                        password=password or "",
+                        database=database,
+                    )
+                candidate = {
+                    "kind": "execution_spec",
+                    "source": source_label,
+                    "execution_spec": spec,
+                    "evidence_url": result.get("kb_path", ""),
+                    "confidence": 0.9,
+                    "reason": "本地知识库 SQL 场景命中",
+                    "validation_hint": dict(spec.get("oracle") or {}),
+                }
+                updates["execution_spec"] = spec
+                updates["protocol"] = "database"
+                updates.update(_candidate_update(
+                    state,
+                    [candidate],
+                    fallback_phase="reference_analysis",
+                ))
+                return updates
+
             if result.get("yaml_content"):
                 updates.update(_candidate_update(
                     state,
@@ -373,8 +449,8 @@ def node_local_kb_search(state: CVEState) -> dict:
                 ))
                 return updates
 
-            # trickest-cve 命中但未提取到 HTTP PoC，保留 github_repos 供参考
-            console.print("  [yellow]⚠ 本地 KB 无可用 HTTP PoC，继续远程搜索[/]")
+            # trickest-cve 命中但未提取到 HTTP/SQL PoC，保留 github_repos 供参考
+            console.print("  [yellow]⚠ 本地 KB 无可用 HTTP/SQL PoC，继续远程搜索[/]")
             updates["current_phase"] = "reference_analysis"
             return updates
 
@@ -757,7 +833,12 @@ def node_verify_poc(state: CVEState) -> dict:
         },
     )
 
-    if not candidate.get("raw_http") and not candidate.get("nuclei_yaml") and not candidate.get("request_steps"):
+    if (
+        not candidate.get("raw_http")
+        and not candidate.get("nuclei_yaml")
+        and not candidate.get("request_steps")
+        and not candidate.get("execution_spec")
+    ):
         milestones = _mark_milestone_map(
             milestones,
             "request_executed",
@@ -924,7 +1005,19 @@ def node_verify_poc(state: CVEState) -> dict:
         hint = classify_error(result.get("error", "未知错误"), source=verify_source, error_type=result.get("error_type", ""))
         console.print(f"  [red]✗ 请求失败:[/] {result.get('error', '未知错误')}")
         updates["error_messages"] = state.error_messages + [result.get("error", "")]
-        updates.update(make_status_update(state.status_code, hint.code, hint.message))
+        # A single nuclei/tool failure must not erase earlier successful HTTP
+        # attempts that only lacked exploit evidence. Keep the more informative
+        # "request completed" status in that case.
+        prior_request_success = any(
+            bool(item.get("request_success")) for item in state.attempt_history
+        ) or bool(success)
+        transient_infra_codes = {
+            HTTP2PCAP_SERVICE_FAILED,
+            PCAP_CAPTURE_FAILED,
+            HTTP_REQUEST_FAILED,
+        }
+        if not (prior_request_success and hint.code in transient_infra_codes):
+            updates.update(make_status_update(state.status_code, hint.code, hint.message))
         updates["attempt_history"] = _append_attempt_history(
             state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
             oracle_result=oracle, candidate=candidate,
@@ -1009,9 +1102,9 @@ def node_generate_report(state: CVEState) -> dict:
 
     if state.status != "SUCCESS":
         final_status = "FAILURE"
-        if not state.is_http_vuln:
-            final_code = NOT_HTTP_VULN
-            final_msg = "漏洞非 HTTP 类型，工作流不支持"
+        if not state.is_http_vuln and getattr(state, "protocol", "") != PROTOCOL_DATABASE:
+            final_code = state.status_code or PROTOCOL_UNSUPPORTED
+            final_msg = state.message or status_description(final_code)
         elif state.status_code == PARAMETER_ERROR:
             final_code = PARAMETER_ERROR
             final_msg = state.message
@@ -1033,6 +1126,46 @@ def node_generate_report(state: CVEState) -> dict:
         final_msg = state.message
 
     final_msg = _augment_final_message(state, final_status, final_msg)
+
+    teardown_result = teardown_environment(state.attack_environment)
+    attack_environment = deepcopy(state.attack_environment)
+    attack_environment["teardown_result"] = teardown_result
+    environment_spec = deepcopy(state.environment_spec)
+    if environment_spec:
+        environment_spec["teardown_result"] = teardown_result
+        try:
+            write_environment_manifest(environment_spec, Path(cfg.output_dir) / state.cve_id)
+        except Exception as exc:
+            teardown_result = {
+                **teardown_result,
+                "manifest_error": f"环境 manifest 更新失败: {exc}",
+            }
+            attack_environment["teardown_result"] = teardown_result
+            environment_spec["teardown_result"] = teardown_result
+
+    cleanup_status = "skipped" if teardown_result.get("skipped") else (
+        "passed" if teardown_result.get("success") else "failed"
+    )
+    milestones = _mark_milestone_map(
+        state.milestones,
+        "environment_cleanup",
+        cleanup_status,
+        message=teardown_result.get("error") or teardown_result.get("reason") or "environment cleanup completed",
+        data={"teardown_result": teardown_result},
+    )
+
+    failure_class = classify_failure(final_code) if final_status != "SUCCESS" else "none"
+    # First pass tier without bundle completeness.
+    success_tier = derive_success_tier(
+        status_code=final_code,
+        success_level=state.success_level,
+        milestones=milestones,
+        attempt_history=state.attempt_history,
+        ips_matched=state.ips_matched,
+        target_oracle_success=state.target_oracle_success,
+        repro_bundle_complete=False,
+        cleanup_status=cleanup_status,
+    )
 
     prompt = ANALYSIS_REPORT.format(
         cve_id=state.cve_id,
@@ -1074,6 +1207,57 @@ def node_generate_report(state: CVEState) -> dict:
         with open(output_dir / "report.md", "w", encoding="utf-8") as f:
             f.write(report)
 
+    if state.poc_raw_http:
+        with open(output_dir / "poc.http", "w", encoding="utf-8") as f:
+            f.write(state.poc_raw_http)
+
+    if state.poc_nuclei_yaml:
+        with open(output_dir / "poc.yaml", "w", encoding="utf-8") as f:
+            f.write(state.poc_nuclei_yaml)
+
+    repro_bundle = write_repro_bundle(
+        output_dir,
+        cve_id=state.cve_id,
+        status=final_status,
+        status_code=final_code,
+        message=final_msg,
+        success_tier=success_tier,
+        failure_class=failure_class,
+        success_level=state.success_level,
+        poc_source=state.poc_source,
+        poc_raw_http=state.poc_raw_http,
+        poc_nuclei_yaml=state.poc_nuclei_yaml,
+        pcap_file_path=state.pcap_file_path,
+        attack_environment=attack_environment,
+        environment_spec=environment_spec,
+        environment_teardown_result=teardown_result,
+        oracle_result=state.oracle_result,
+        executor_result=state.executor_result,
+        milestones=milestones,
+        attempt_history=state.attempt_history,
+        execution_spec=getattr(state, "execution_spec", {}) or {},
+    )
+    # Promote to L4 when bundle is complete after L2/L3 evidence.
+    success_tier = derive_success_tier(
+        status_code=final_code,
+        success_level=state.success_level,
+        milestones=milestones,
+        attempt_history=state.attempt_history,
+        ips_matched=state.ips_matched,
+        target_oracle_success=state.target_oracle_success,
+        repro_bundle_complete=bool(repro_bundle.get("complete")),
+        cleanup_status=cleanup_status,
+    )
+    repro_bundle["success_tier"] = success_tier
+    try:
+        manifest_path = Path(repro_bundle["manifest_path"])
+        if manifest_path.is_file():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["success_tier"] = success_tier
+            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
     report_data = {
         "cve_id": state.cve_id,
         "status": final_status,
@@ -1090,20 +1274,28 @@ def node_generate_report(state: CVEState) -> dict:
         "attempt_history": state.attempt_history,
         "agent_trace": state.agent_trace,
         "environment_candidates": state.environment_candidates,
-        "attack_environment": state.attack_environment,
-        "environment_spec": state.environment_spec,
+        "attack_environment": attack_environment,
+        "environment_spec": environment_spec,
         "environment_manifest_path": state.environment_manifest_path,
         "environment_setup_result": state.environment_setup_result,
+        "environment_teardown_result": teardown_result,
         "trigger_candidates": state.trigger_candidates,
         "validation_hints": state.validation_hints,
         "candidate_reviews": state.candidate_reviews,
-        "milestones": state.milestones,
+        "milestones": milestones,
         "executor_result": state.executor_result,
         "oracle_result": state.oracle_result,
         "target_oracle_success": state.target_oracle_success,
         "target_oracle_type": state.target_oracle_type,
         "target_oracle_details": state.target_oracle_details,
         "success_level": state.success_level,
+        "success_tier": success_tier,
+        "failure_class": failure_class,
+        "protocol": getattr(state, "protocol", "") or ("http" if state.is_http_vuln else "unsupported"),
+        "execution_spec": getattr(state, "execution_spec", {}) or {},
+        "repro_bundle_path": repro_bundle.get("path", ""),
+        "repro_bundle_complete": bool(repro_bundle.get("complete")),
+        "repro_bundle": repro_bundle,
         "phases_tried": state.phases_tried,
         "ips_matched": state.ips_matched,
         "generic_ips_matched": state.generic_ips_matched,
@@ -1117,20 +1309,25 @@ def node_generate_report(state: CVEState) -> dict:
     with open(output_dir / "result.json", "w", encoding="utf-8") as f:
         json.dump(report_data, f, ensure_ascii=False, indent=2)
 
-    if state.poc_raw_http:
-        with open(output_dir / "poc.http", "w", encoding="utf-8") as f:
-            f.write(state.poc_raw_http)
-
-    if state.poc_nuclei_yaml:
-        with open(output_dir / "poc.yaml", "w", encoding="utf-8") as f:
-            f.write(state.poc_nuclei_yaml)
-
     console.print(f"  [green]✓[/] 报告与产物已保存到 {output_dir}")
+    if repro_bundle.get("path"):
+        console.print(
+            f"  [green]✓[/] repro bundle: {repro_bundle['path']} "
+            f"(tier={success_tier}, class={failure_class}, complete={repro_bundle.get('complete')})"
+        )
     return {
         "analysis_report": report,
         "status": final_status,
         "status_code": final_code,
         "message": final_msg,
+        "attack_environment": attack_environment,
+        "environment_spec": environment_spec,
+        "environment_teardown_result": teardown_result,
+        "milestones": milestones,
+        "success_tier": success_tier,
+        "failure_class": failure_class,
+        "repro_bundle_path": repro_bundle.get("path", ""),
+        "repro_bundle_complete": bool(repro_bundle.get("complete")),
         "current_phase": "done",
     }
 
@@ -1175,12 +1372,20 @@ def _infer_raw_http_validation_hint(raw_http: str) -> dict:
         "../",
         "..%2f",
         "%2e%2e",
+        "..../",          # Gradio CVE-2023-51449 style: ....//
         "boot.ini",
         "win.ini",
     )):
         return {
             "type": "response_contains",
-            "markers": ["root:", "[boot loader]", "[extensions]", "localhost"],
+            "markers": ["root:", "root:x:", "[boot loader]", "[extensions]", "localhost"],
+            "case_sensitive": False,
+        }
+    # Gradio /file= route: any path access is a traversal context
+    if "/file=" in text:
+        return {
+            "type": "response_contains",
+            "markers": ["root:", "root:x:", "[boot loader]", "[extensions]", "localhost"],
             "case_sensitive": False,
         }
     return {}
@@ -1326,6 +1531,18 @@ def _poc_preview(state: CVEState) -> str:
 def _candidate_key(candidate: dict) -> str:
     kind = candidate.get("kind", "")
     body = candidate.get("raw_http") or candidate.get("nuclei_yaml") or ""
+    if not body and isinstance(candidate.get("execution_spec"), dict):
+        spec = candidate["execution_spec"]
+        body = json.dumps(
+            {
+                "protocol": spec.get("protocol", ""),
+                "engine": spec.get("engine", ""),
+                "trigger_sql": spec.get("trigger_sql", []),
+                "oracle": spec.get("oracle", {}),
+            },
+            ensure_ascii=False,
+            sort_keys=True,
+        )
     if not kind or not body:
         return ""
     return f"{kind}:{body.strip()}"
@@ -1351,12 +1568,18 @@ def _replace_current_candidate_update(state: CVEState, candidate: dict) -> dict:
 
 
 def _select_candidate_update(candidate: dict, index: int) -> dict:
-    return {
+    updates = {
         "current_candidate_index": index,
         "poc_source": candidate.get("source", ""),
         "poc_raw_http": candidate.get("raw_http", ""),
         "poc_nuclei_yaml": candidate.get("nuclei_yaml", ""),
     }
+    if isinstance(candidate.get("execution_spec"), dict):
+        updates["execution_spec"] = candidate["execution_spec"]
+        protocol = str(candidate["execution_spec"].get("protocol") or "")
+        if protocol:
+            updates["protocol"] = protocol
+    return updates
 
 
 def _next_attempt_or_phase_update(state: CVEState) -> dict:
@@ -1389,13 +1612,21 @@ def _append_attempt_history(
 ) -> list[dict]:
     oracle_result = oracle_result or {}
     target_oracle = oracle_result.get("target_oracle", {})
+    cand = candidate or _current_candidate(state)
+    if cand.get("execution_spec"):
+        kind = "execution_spec"
+    elif state.poc_nuclei_yaml and not state.poc_raw_http:
+        kind = "nuclei_yaml"
+    else:
+        kind = cand.get("kind") or "raw_http"
     return state.attempt_history + [{
         "attempt": len(state.attempt_history) + 1,
         "candidate_index": state.current_candidate_index if state.poc_candidates else None,
         "source": state.poc_source,
-        "kind": "nuclei_yaml" if state.poc_nuclei_yaml and not state.poc_raw_http else "raw_http",
+        "kind": kind,
         "outcome": outcome,
-        "request_success": bool(result.get("success", False)),
+        # 数据库等非 HTTP 执行：success 表示 oracle 命中；request_success 表示已触发执行
+        "request_success": bool(result.get("request_success", result.get("success", False))),
         "http_status_code": result.get("status_code", 0),
         "ips_matched": ips_matched,
         "generic_ips_matched": generic_ips_matched,
@@ -1431,7 +1662,7 @@ def _current_candidate(state: CVEState) -> dict:
 
 def _candidate_history_view(candidate: dict) -> dict:
     """生成适合写入 result.json 的候选摘要，避免 YAML 体积过大。"""
-    return {
+    view = {
         "kind": candidate.get("kind", ""),
         "source": candidate.get("source", ""),
         "trigger_id": candidate.get("trigger_id", ""),
@@ -1444,6 +1675,9 @@ def _candidate_history_view(candidate: dict) -> dict:
         "raw_http": candidate.get("raw_http", ""),
         "nuclei_yaml_preview": candidate.get("nuclei_yaml", "")[:2000],
     }
+    if isinstance(candidate.get("execution_spec"), dict):
+        view["execution_spec"] = candidate["execution_spec"]
+    return view
 
 
 def _llm_poc_candidates(
@@ -1533,9 +1767,10 @@ def route_after_validate(state: CVEState) -> str:
 
 
 def route_after_type_check(state: CVEState) -> str:
-    if not state.is_http_vuln:
-        return "generate_report"
-    return "environment_agent"
+    # HTTP 与数据库可继续；其余非 HTTP 仅保留接口，直接归档。
+    if state.is_http_vuln or getattr(state, "protocol", "") == PROTOCOL_DATABASE:
+        return "environment_agent"
+    return "generate_report"
 
 
 def route_after_environment(state: CVEState) -> str:
@@ -1548,6 +1783,12 @@ def route_after_environment(state: CVEState) -> str:
 def route_after_local_kb(state: CVEState) -> str:
     """本地 KB 搜索后路由：找到 PoC 则直接验证，否则继续常规流程。"""
     if state.current_phase == "verify_poc":
+        return "verify_poc"
+    # 数据库候选即使 phase 字段异常，只要已有 execution_spec 也直接验证
+    if getattr(state, "protocol", "") == PROTOCOL_DATABASE and (
+        getattr(state, "execution_spec", None)
+        or any(isinstance(c.get("execution_spec"), dict) for c in (state.poc_candidates or []))
+    ):
         return "verify_poc"
     return "reference_analysis"
 

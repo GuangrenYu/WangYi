@@ -288,7 +288,7 @@ def finalize_capture(pcap_file_path: str, *, keep: bool) -> str:
         path.unlink(missing_ok=True)
         return ""
     relative = resolved.relative_to(pending_root)
-    final_path = root / relative.parent / "CVE.pcap"
+    final_path = root / relative.parent / relative.name
     final_path.parent.mkdir(parents=True, exist_ok=True)
     path.replace(final_path)
     return str(final_path)

@@ -24,6 +24,8 @@ class CVEState:
     # ── AI 判断 ──
     is_http_vuln: bool = True
     vuln_type: str = ""
+    # http / database / tcp / kernel / unsupported
+    protocol: str = "http"
 
     # ── PoC 相关 ──
     reference_contents: list[dict[str, str]] = field(default_factory=list)
@@ -34,6 +36,8 @@ class CVEState:
     poc_candidates: list[dict[str, Any]] = field(default_factory=list)
     current_candidate_index: int = 0
     attempt_history: list[dict[str, Any]] = field(default_factory=list)
+    # 非 HTTP 结构化执行规格（数据库优先）
+    execution_spec: dict[str, Any] = field(default_factory=dict)
 
     # ── Agent 中间产物 ──
     agent_trace: list[dict[str, Any]] = field(default_factory=list)
@@ -42,6 +46,7 @@ class CVEState:
     environment_spec: dict[str, Any] = field(default_factory=dict)
     environment_manifest_path: str = ""
     environment_setup_result: dict[str, Any] = field(default_factory=dict)
+    environment_teardown_result: dict[str, Any] = field(default_factory=dict)
     trigger_candidates: list[dict[str, Any]] = field(default_factory=list)
     validation_hints: list[dict[str, Any]] = field(default_factory=list)
     candidate_reviews: list[dict[str, Any]] = field(default_factory=list)
@@ -63,6 +68,12 @@ class CVEState:
     target_oracle_type: str = ""
     target_oracle_details: dict[str, Any] = field(default_factory=dict)
     success_level: str = ""
+    # L0–L4 成功层级；与 success_level（旧细粒度标签）并存
+    success_tier: str = ""
+    # 失败归因粗类：environment/candidate/evidence/policy/...
+    failure_class: str = ""
+    repro_bundle_path: str = ""
+    repro_bundle_complete: bool = False
 
     # ── 流程控制 ──
     current_phase: str = "init"
@@ -74,4 +85,4 @@ class CVEState:
     status_code: str = ""
     message: str = ""
     analysis_report: str = ""
-    generate_report: bool = True  # 是否生成 LLM 分析报告（单CVE默认开启，批量默认关闭）
+    generate_report: bool = False  # 是否生成 LLM 分析报告（单CVE默认开启，批量默认关闭）

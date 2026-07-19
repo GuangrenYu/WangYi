@@ -1,5 +1,7 @@
+import json
 import unittest
 import tempfile
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -230,6 +232,35 @@ class GraphCandidateTests(unittest.TestCase):
 
         self.assertEqual(update["status_code"], EXECUTION_POLICY_BLOCKED)
         self.assertIn("plan_only", update["message"])
+
+    def test_generate_report_archives_environment_cleanup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            state = CVEState(
+                cve_id="CVE-2024-0002",
+                generate_report=False,
+                attack_environment={"launcher": "docker_compose"},
+                environment_spec={"cve_id": "CVE-2024-0002"},
+                environment_manifest_path=str(Path(tmp) / "CVE-2024-0002" / "environment_manifest.json"),
+            )
+            teardown_result = {
+                "success": True,
+                "skipped": False,
+                "launcher": "docker_compose",
+            }
+            with (
+                patch("cve_hunter.graph.cfg", SimpleNamespace(output_dir=tmp, run_mode="plan_only", target_allowlist=[])),
+                patch("cve_hunter.graph.teardown_environment", return_value=teardown_result),
+            ):
+                update = node_generate_report(state)
+
+            output_dir = Path(tmp) / "CVE-2024-0002"
+            result_data = json.loads((output_dir / "result.json").read_text(encoding="utf-8"))
+            manifest_data = json.loads((output_dir / "environment_manifest.json").read_text(encoding="utf-8"))
+
+        self.assertEqual(update["environment_teardown_result"], teardown_result)
+        self.assertEqual(result_data["environment_teardown_result"], teardown_result)
+        self.assertEqual(manifest_data["teardown_result"], teardown_result)
+        self.assertEqual(result_data["milestones"]["environment_cleanup"]["status"], "passed")
 
 
 if __name__ == "__main__":

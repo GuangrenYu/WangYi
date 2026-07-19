@@ -68,11 +68,14 @@ cp .env.example .env
 - `WAYBACK_URL` — 外部 wayback-cve 服务地址
 - `TARGET_IP` — PoC 验证目标 IP
 
-**Docker/Vulhub 自动环境：**
-- `AUTO_ENV_ENABLED=false` — 默认只发现并记录本地 compose 环境，不自动拉镜像或启动容器
-- `AUTO_ENV_ENABLED=true` — 命中 `ATTACK_ENV_COMPOSE_FILE` 或本地 `VULHUB_DIR` 中的 CVE compose 时，执行 `docker compose pull` 和 `docker compose up -d`
-- `VULHUB_DIR=third_party/vulhub` — 本地 vulhub 目录，系统会查找 `**/<CVE-ID>/docker-compose.yml`
-- 本地模式发现 `VULHUB_DIR` 不存在时，会自动浅克隆 Vulhub；命中 compose 后自动拉取镜像并启动
+**多靶场自动环境：**
+- `AUTO_ENV_ENABLED=false` — 默认只发现并记录环境候选，不自动启动
+- `AUTO_ENV_ENABLED=true` — 按优先级尝试显式 Compose、Vulhub、Vulfocus、Reapoc、vulnerability-poc 和 Metarget 候选
+- `VULHUB_DIR` / `REAPOC_DIR` / `VULNERABILITY_POC_DIR` / `METARGET_DIR` — 各本地环境源目录
+- `ENVIRONMENT_REPO_AUTO_CLONE=true` — 本地容器模式会自动浅克隆缺失的开源环境仓库
+- `ENVIRONMENT_AUTO_CLEANUP=true` — 任务归档前回收本次成功启动的环境，不会停止预先存在的靶场
+- `VULFOCUS_API_URL` / `VULFOCUS_USERNAME` / `VULFOCUS_LICENCE` — Vulfocus 镜像发现、启动和停止配置
+- `METARGET_EXECUTION_ENABLED=false` — Metarget 默认只发现；仅在专用 Linux 靶机显式授权后执行安装和卸载
 - `ATTACK_ENV_COMPOSE_FILE` — 显式指定 compose 文件时优先使用
 - `ATTACK_ENV_TARGET_URL` — 覆盖从 compose 端口推断出的目标 URL
 
@@ -106,6 +109,16 @@ python main.py --batch --file fhq-http.txt --start 1 --end 100 --terminals 5 --l
 # 继续尚未完成的本地容器批量测试
 python main.py --continue --file fhq-http.txt --terminals 5 --local-container
 
+# 查询 Oracle/Jenkins/Tomcat/Microsoft 官网公告，生成真实产品靶场候选
+python -m tools.discover_official_labs
+
+# 只查询指定厂商或指定 Microsoft 安全更新月份
+python -m tools.discover_official_labs --vendors oracle,jenkins,tomcat --max-advisories 2
+python -m tools.discover_official_labs --vendors microsoft --msrc-month 2026-Jul
+
+# 按 CVE 文件反查 Oracle/Jenkins/Tomcat 7-11/MSRC 历史公告
+python -m tools.discover_official_labs --historical --cve-file data/test_cases/未在工作流实现.txt
+
 # 分类筛选：只做 HTTP/非 HTTP 判断，输出 fhq-http_h.txt 和 fhq-http_f.txt
 python main.py --classify --file fhq-http.txt
 
@@ -131,6 +144,8 @@ python main.py
 
 批量测试会按 `data/test_cases/*.txt` 中出现的 CVE 编号顺序执行，范围为 1-based 闭区间。批量模式会隐藏单条任务内部的查询、AI 生成和发包过程日志，只在每个 CVE 完成后显示最终结果、进度和正确率；明细会在每条结束后实时写入 `output/batch/`。
 
+官网公告发现结果写入 `output/vendor_labs/official_lab_candidates.json` 和 `.md`。候选只使用厂商官方公告作为漏洞证据，并分别记录 `environment_status`、`deployment_type` 和 `media_status`；商业产品仍需使用合法授权的安装介质，工具不会自动下载或绕过许可。介质可用性只对带明确文件名和安装包扩展名的 URL 执行 `HEAD` 核验，目录页可访问不会被记为“已验证可下载”。历史模式必须同时传入 `--cve-file`，Oracle 使用 CVE 映射页，Tomcat 扫描 7–11 全部历史安全页，Microsoft 先分页查询官方索引，再只获取命中月份的 CVRF。
+
 批量测试支持 `--terminals/-t` 自动拆分范围，并通过 VS Code Tasks 在集成终端中并行运行；交互模式下选择测试范围后也会询问启动终端数量，默认 1 个。多终端启动会自动写入 `output/vscode/cve_hunter_launch.code-workspace` 并打开一个 VS Code 自动任务工作区。
 
 分类筛选同样支持 `--start` / `--end`，但只调用 NVD 查询和 AI HTTP/Web 类型判断，不执行 PoC 检索、发包或抓包。
@@ -151,7 +166,7 @@ python main.py
 | `poc.http` | 原始 HTTP 请求 PoC |
 | `poc.yaml` | Nuclei YAML 模板（如有） |
 
-只有最终验证通过（当前 CVE 的 IPS 命中或目标侧 oracle 成功）的 PCAP 才会保存为 `data/cve/pcaps/YYYY-MM-DD/CVE.pcap`；失败候选的临时抓包会自动删除。同一天后续成功案例会覆盖该文件。可用 `PCAP_OUTPUT_DIR` 修改归档根目录。
+只有最终验证通过（当前 CVE 的 IPS 命中或目标侧 oracle 成功）的 PCAP 才会保存为 `data/cve/pcaps/YYYY-MM-DD/<CVE-ID>.pcap`；失败候选的临时抓包会自动删除。同一天同一 CVE 的后续成功案例会覆盖该文件。可用 `PCAP_OUTPUT_DIR` 修改归档根目录。
 
 ### 本地发包与抓包服务（Windows）
 
@@ -168,7 +183,7 @@ HTTP2PCAP_URL=http://127.0.0.1:3012
 RUN_MODE=local_lab
 ```
 
-健康检查为 `GET /api/health`，发包接口为 `POST /api/http2pcap`。每次请求会在 `data/cve/pcaps/YYYY-MM-DD/` 生成独立 `.pcap`；如果目标走物理网卡，可通过 `--interface <dumpcap接口编号或名称>` 指定接口，接口列表可用 `dumpcap -D` 查看。
+健康检查为 `GET /api/health`，raw HTTP 和 Nuclei 发包接口分别为 `POST /api/http2pcap`、`POST /api/nuclei-poc`。抓包先写入 `.pending/YYYY-MM-DD/`，只有现有验证 oracle 判定命中后才归档为 `YYYY-MM-DD/<CVE-ID>.pcap`；Nuclei 接口需要本机已安装 `nuclei`，也可用 `NUCLEI_PATH` 指定路径。如果目标走物理网卡，可通过 `--interface <dumpcap接口编号或名称>` 指定接口，接口列表可用 `dumpcap -D` 查看。
 
 ## 返回状态码
 

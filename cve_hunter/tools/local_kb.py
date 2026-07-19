@@ -20,6 +20,7 @@ import httpx
 
 from cve_hunter.config import cfg
 from cve_hunter.poc_parser import extract_http_requests
+from cve_hunter.tools.db_spec import extract_database_spec_from_paths
 
 
 # ── 路径辅助 ──
@@ -74,9 +75,9 @@ def search_local_kb(cve_id: str) -> dict:
     if pcap_result.get("raw_http"):
         return pcap_result
 
-    # 3) 本地 Vulhub README —— 靶场说明里通常直接给出复现请求
+    # 3) 本地 Vulhub README —— HTTP 请求或数据库 SQL 场景
     vulhub_result = _search_vulhub_readme(cve_id)
-    if vulhub_result.get("raw_http"):
+    if vulhub_result.get("raw_http") or vulhub_result.get("execution_spec"):
         return vulhub_result
 
     # 4) trickest-cve/ —— 外部 PoC 目录
@@ -97,6 +98,18 @@ def search_local_kb(cve_id: str) -> dict:
                     "github_repos": parsed["github_repos"],
                     "references": parsed.get("references", []),
                 }
+        db_spec = extract_database_spec_from_paths([trickest_file], cve_id=cve_id)
+        if db_spec:
+            return {
+                "found": True,
+                "source": "local_kb_trickest_sql",
+                "kb_path": str(trickest_file),
+                "raw_http": "",
+                "execution_spec": db_spec,
+                "github_repos": parsed.get("github_repos", []),
+                "references": parsed.get("references", []),
+                "content": parsed.get("description", ""),
+            }
         return {
             "found": True,
             "source": "local_kb_trickest",
@@ -130,8 +143,9 @@ def _parse_custom_kb(content: str, cve_id: str) -> dict:
 
 
 def _search_vulhub_readme(cve_id: str) -> dict:
-    """从已接入本地环境源的 README 提取 Raw HTTP PoC。"""
-    for readme in _vulhub_readmes_for_cve(cve_id):
+    """从已接入本地环境源的 README 提取 Raw HTTP 或数据库 execution_spec。"""
+    readmes = _vulhub_readmes_for_cve(cve_id)
+    for readme in readmes:
         raw_http = _first_http_request(readme.read_text(encoding="utf-8", errors="ignore"))
         if raw_http:
             return {
@@ -143,6 +157,18 @@ def _search_vulhub_readme(cve_id: str) -> dict:
                 "references": [],
                 "content": "",
             }
+    db_spec = extract_database_spec_from_paths(readmes, cve_id=cve_id)
+    if db_spec:
+        return {
+            "found": True,
+            "source": "local_kb_vulhub_sql",
+            "kb_path": str(db_spec.get("source_path") or (readmes[0] if readmes else "")),
+            "raw_http": "",
+            "yaml_content": "",
+            "execution_spec": db_spec,
+            "references": [],
+            "content": "",
+        }
     return {"found": False, "source": "local_kb_vulhub"}
 
 

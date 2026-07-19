@@ -37,6 +37,7 @@ class EnvironmentSpec:
     workdir: str = ""
     setup_mode: str = ""
     setup_result: dict[str, Any] = field(default_factory=dict)
+    teardown_result: dict[str, Any] = field(default_factory=dict)
     healthcheck: HealthCheckSpec = field(default_factory=HealthCheckSpec)
     preconditions: list[str] = field(default_factory=list)
     evidence_urls: list[str] = field(default_factory=list)
@@ -65,6 +66,11 @@ def build_environment_spec(
     target_host = str(environment.get("target_host") or selected.get("target_host") or "")
     compose_file = str(environment.get("compose_file") or selected.get("compose_file") or "")
     setup_result = environment.get("setup_result") if isinstance(environment.get("setup_result"), dict) else {}
+    teardown_result = (
+        environment.get("teardown_result")
+        if isinstance(environment.get("teardown_result"), dict)
+        else {}
+    )
     setup_mode = str(environment.get("setup_mode") or ("docker_compose" if compose_file else "not_required"))
     source = str(environment.get("source") or selected.get("source") or "default_target")
     kind = str(environment.get("kind") or selected.get("kind") or "remote_or_existing_target")
@@ -91,6 +97,7 @@ def build_environment_spec(
         workdir=str(environment.get("workdir") or selected.get("workdir") or ""),
         setup_mode=setup_mode,
         setup_result=setup_result,
+        teardown_result=teardown_result,
         healthcheck=HealthCheckSpec(url=target_url),
         preconditions=list(preconditions or []),
         evidence_urls=list(evidence_urls or []),

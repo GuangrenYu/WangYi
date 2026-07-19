@@ -24,7 +24,7 @@ def get_llm(*, model: str | None = None, temperature: float = 0.2, max_tokens: i
             return None
         import httpx as _httpx
         from langchain_openai import ChatOpenAI
-        http_client = _httpx.Client(proxy=cfg.httpx_proxy) if cfg.httpx_proxy else None
+        http_client = _httpx.Client(proxy=cfg.httpx_proxy, trust_env=False)
         _llm_cache[cache_key] = ChatOpenAI(
             model=cache_key[0],
             api_key=cfg.llm_api_key,

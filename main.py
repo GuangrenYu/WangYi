@@ -71,6 +71,10 @@ class BatchResult:
     cve_ips_match_count: int = 0
     generic_ips_match_count: int = 0
     success_level: str = ""
+    success_tier: str = ""
+    failure_class: str = ""
+    repro_bundle_path: str = ""
+    repro_bundle_complete: bool = False
     milestones: dict = field(default_factory=dict)
     environment_manifest_path: str = ""
 
@@ -115,6 +119,7 @@ def run_cve(
     local_container_mode: bool = False,
 ) -> CVEState:
     """执行一次 CVE 复现流程。"""
+    from cve_hunter.agents import reclaim_owned_compose_projects
     from cve_hunter.graph import build_graph
     from cve_hunter.state import CVEState
 
@@ -135,7 +140,20 @@ def run_cve(
         local_container_mode=local_container_mode,
     )
 
-    final_state = graph.invoke(initial_state)
+    final_state = None
+    try:
+        final_state = graph.invoke(initial_state)
+    finally:
+        # Safety net for residual containers when report teardown was skipped
+        # or intermediate cleanup failed after compose up.
+        reclaim_results = reclaim_owned_compose_projects()
+        failed_reclaims = [item for item in reclaim_results if not item.get("success")]
+        if failed_reclaims and show_details:
+            names = ", ".join(item.get("project_name", "?") for item in failed_reclaims)
+            console.print(f"[yellow]⚠ 容器强制回收未完全成功: {names}[/yellow]")
+
+    if final_state is None:
+        raise RuntimeError(f"工作流未返回结果: {cve_id}")
 
     # 输出结果摘要
     if show_details:
@@ -233,6 +251,44 @@ def load_cve_ids(path: Path) -> list[str]:
             continue
         cve_ids.append(match.group(0).upper())
     return cve_ids
+
+
+def collect_successful_pcap_cve_ids(root: Path | None = None) -> set[str]:
+    """Collect CVEs already archived in the historical vulnerability PCAP library."""
+    pcap_root = root or (Path(cfg.pcap_output_dir) / "漏洞类")
+    if not pcap_root.is_dir():
+        return set()
+    completed: set[str] = set()
+    for path in pcap_root.rglob("*.pcap"):
+        match = CVE_PATTERN.search(path.stem)
+        if match:
+            completed.add(match.group(0).upper())
+    return completed
+
+
+def collect_successful_batch_cve_ids(batch_dir: Path | None = None) -> set[str]:
+    """Collect CVEs with an explicit successful batch result."""
+    root = batch_dir or BATCH_DIR
+    if not root.is_dir():
+        return set()
+    completed: set[str] = set()
+    for path in root.glob("*.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for result in data.get("results") or []:
+            if not isinstance(result, dict):
+                continue
+            cve_id = str(result.get("cve_id") or "").upper()
+            passed = bool(result.get("passed")) or str(result.get("status") or "").upper() == "SUCCESS"
+            if passed and CVE_PATTERN.fullmatch(cve_id):
+                completed.add(cve_id)
+    return completed
+
+
+def collect_successful_cve_ids() -> set[str]:
+    return collect_successful_pcap_cve_ids() | collect_successful_batch_cve_ids()
 
 
 def choose_range(total: int, start: int | None, end: int | None) -> tuple[int, int]:
@@ -451,6 +507,10 @@ def execute_cve_as_batch_result(
         cve_ips_match_count = int(ips_summary.get("cve_match_count") or 0)
         generic_ips_match_count = int(ips_summary.get("generic_match_count") or 0)
         success_level = final_state.get("success_level", "")
+        success_tier = final_state.get("success_tier", "")
+        failure_class = final_state.get("failure_class", "")
+        repro_bundle_path = final_state.get("repro_bundle_path", "")
+        repro_bundle_complete = bool(final_state.get("repro_bundle_complete", False))
         milestones = final_state.get("milestones", {}) or {}
         environment_manifest_path = final_state.get("environment_manifest_path", "")
     except Exception as exc:
@@ -466,6 +526,10 @@ def execute_cve_as_batch_result(
         cve_ips_match_count = 0
         generic_ips_match_count = 0
         success_level = ""
+        success_tier = ""
+        failure_class = "infrastructure"
+        repro_bundle_path = ""
+        repro_bundle_complete = False
         milestones = {}
         environment_manifest_path = ""
 
@@ -485,6 +549,10 @@ def execute_cve_as_batch_result(
         cve_ips_match_count=cve_ips_match_count,
         generic_ips_match_count=generic_ips_match_count,
         success_level=success_level,
+        success_tier=success_tier,
+        failure_class=failure_class,
+        repro_bundle_path=repro_bundle_path,
+        repro_bundle_complete=repro_bundle_complete,
         milestones=milestones,
         environment_manifest_path=environment_manifest_path,
     )
@@ -504,15 +572,23 @@ def run_batch(
     test_file = resolve_test_file(file_name)
     cve_ids = load_cve_ids(test_file)
     start_index, end_index = choose_range(len(cve_ids), start, end)
-    selected = cve_ids[start_index - 1:end_index]
+    requested = list(enumerate(cve_ids[start_index - 1:end_index], start=start_index))
+    successful_cves = collect_successful_cve_ids()
+    selected = [(index, cve_id) for index, cve_id in requested if cve_id not in successful_cves]
+    skipped_successful = len(requested) - len(selected)
     total = len(selected)
+    if not selected:
+        console.print(f"[green]所选范围内的 {len(requested)} 个 CVE 均已有成功记录，无需重复测试。[/green]")
+        return []
     selected_terminals = choose_terminal_count(total, terminal_count, prompt=should_prompt_terminals)
 
     if selected_terminals > 1:
         ranges = split_contiguous_range(start_index, end_index, selected_terminals)
         console.print(Panel(
             f"测试文件: [bold yellow]{test_file}[/bold yellow]\n"
-            f"总范围: 第 {start_index} 到第 {end_index} 个，共 {total} 个\n"
+            f"总范围: 第 {start_index} 到第 {end_index} 个，共 {len(requested)} 个\n"
+            f"历史成功跳过: {skipped_successful} 个\n"
+            f"本次待执行: {total} 个\n"
             f"启动 VS Code 集成终端: {len(ranges)} 个",
             title="批量测试多终端启动",
             border_style="cyan",
@@ -528,7 +604,9 @@ def run_batch(
     console.print(Panel(
         f"测试文件: [bold yellow]{test_file}[/bold yellow]\n"
         f"文件 CVE 总数: {len(cve_ids)}\n"
-        f"本次范围: 第 {start_index} 到第 {end_index} 个，共 {total} 个\n"
+        f"本次范围: 第 {start_index} 到第 {end_index} 个，共 {len(requested)} 个\n"
+        f"历史成功跳过: {skipped_successful} 个\n"
+        f"本次待执行: {total} 个\n"
         f"目标IP: {cfg.target_ip}",
         title="批量测试",
         border_style="cyan",
@@ -540,8 +618,7 @@ def run_batch(
     output_path = create_batch_results_path(test_file, start_index, end_index)
     write_batch_results(output_path, test_file, start_index, end_index, total, results)
 
-    for offset, cve_id in enumerate(selected, start=1):
-        absolute_index = start_index + offset - 1
+    for absolute_index, cve_id in selected:
         result = execute_cve_as_batch_result(
             absolute_index,
             cve_id,
@@ -581,9 +658,14 @@ def run_continue(
     """继续测试：从原列表减去 output/batch 中已完成的 CVE，批量执行剩余。"""
     test_file = resolve_test_file(file_name)
     cve_ids = load_cve_ids(test_file)
-    completed_indices = collect_completed_indices(test_file)
+    completed_cves = collect_completed_cve_ids(test_file)
+    successful_cves = collect_successful_cve_ids()
 
-    remaining = [(i, cve_id) for i, cve_id in enumerate(cve_ids, start=1) if i not in completed_indices]
+    remaining = [
+        (i, cve_id)
+        for i, cve_id in enumerate(cve_ids, start=1)
+        if cve_id not in completed_cves and cve_id not in successful_cves
+    ]
 
     if not remaining:
         console.print("[green]所有 CVE 已完成测试，无需继续。[/green]")
@@ -601,7 +683,8 @@ def run_continue(
     console.print(Panel(
         f"原文件: [bold yellow]{test_file}[/bold yellow]\n"
         f"总 CVE 数: {len(cve_ids)}\n"
-        f"已完成: [dim]{len(completed_indices)}[/dim]\n"
+        f"本清单已有批测记录: [dim]{len(set(cve_ids) & completed_cves)}[/dim]\n"
+        f"历史成功记录: [dim]{len(set(cve_ids) & successful_cves)}[/dim]\n"
         f"剩余: [bold green]{total_remaining}[/bold green]\n"
         f"终端数: {selected_terminals}\n"
         f"继续文件: {continue_file}",
@@ -750,6 +833,29 @@ def collect_completed_indices(test_file: Path) -> set[int]:
         except Exception:
             pass
 
+    return completed
+
+
+def collect_completed_cve_ids(test_file: Path) -> set[str]:
+    """Collect CVE IDs already recorded for a specific test file."""
+    if not BATCH_DIR.exists():
+        return set()
+
+    completed: set[str] = set()
+    for path in BATCH_DIR.glob("*.json"):
+        try:
+            data = load_batch_record(path)
+            json_test_file = data.get("test_file", "")
+            if json_test_file != str(test_file) and Path(json_test_file).name != test_file.name:
+                continue
+            for result in data.get("results") or []:
+                if not isinstance(result, dict):
+                    continue
+                cve_id = str(result.get("cve_id") or "").upper()
+                if CVE_PATTERN.fullmatch(cve_id):
+                    completed.add(cve_id)
+        except Exception:
+            continue
     return completed
 
 
@@ -1352,6 +1458,46 @@ def run_update_nvd(
     console.print(f"[bold green]本地数据就绪:[/bold green] {status_after['years_available']} 个年份, {status_after['total_size_mb']} MB")
 
 
+def run_env_preflight(
+    file_name: str | None,
+    start: int | None = None,
+    end: int | None = None,
+) -> dict:
+    """Generate a read-only environment readiness report for a CVE list."""
+    from cve_hunter.environment_preflight import run_environment_preflight
+
+    test_file = resolve_test_file(file_name)
+    cve_ids = load_cve_ids(test_file)
+    start_index, end_index = choose_range(
+        len(cve_ids),
+        start if start is not None else 1,
+        end if end is not None else len(cve_ids),
+    )
+    selected = cve_ids[start_index - 1:end_index]
+    report, json_path, markdown_path = run_environment_preflight(
+        selected,
+        compose_root=Path(cfg.vulhub_dir),
+        input_file=test_file,
+        output_dir=Path(cfg.output_dir) / "environment_preflight",
+        range_start=start_index,
+        range_end=end_index,
+    )
+    summary = report["summary"]
+    console.print(Panel(
+        f"清单: [bold yellow]{test_file}[/bold yellow]\n"
+        f"范围: {start_index}-{end_index}\n"
+        f"Compose: {summary['compose_found']}/{summary['total']}\n"
+        f"配置有效: {summary['config_valid']}/{summary['total']}\n"
+        f"镜像全缓存: {summary['fully_cached']}\n"
+        f"静态启动前提满足: {summary['static_start_ready']}",
+        title="环境预检",
+        border_style="cyan",
+    ))
+    console.print(f"[green]JSON:[/green] {json_path}")
+    console.print(f"[green]Markdown:[/green] {markdown_path}")
+    return report
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="CVE Hunter 漏洞复现工具")
     parser.add_argument("cve_id", nargs="?", help="单个 CVE 编号；批量/分类模式下也可作为测试文件名")
@@ -1359,6 +1505,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--continue", "--resume", dest="continue_mode", action="store_true", help="继续测试：自动减去 output/batch 中已完成的 CVE，执行剩余")
     parser.add_argument("--classify", action="store_true", help="快速分类 data/test_cases txt 中的 HTTP/非 HTTP CVE，并输出 *_h.txt/*_f.txt")
     parser.add_argument("--stats", action="store_true", help="统计 output/batch 下已有 JSON 批量测试记录")
+    parser.add_argument("--env-preflight", action="store_true", help="只读检查本地 Compose、镜像、端口和健康检查条件")
     parser.add_argument("--retry-http-failed", "--retry", action="store_true", help="重跑 output/batch 中 HTTP 失败记录并覆盖原结果")
     parser.add_argument("--retry-mode", choices=("failed", "passed", "all", "status"), default="failed", help="二次核验范围: failed=失败记录, passed=历史通过记录, all=两类都核验, status=按状态码筛选")
     parser.add_argument("--retry-passed", action="store_true", help="等同于 --retry --retry-mode passed，用于正确数据核验")
@@ -1476,9 +1623,23 @@ def main():
         run_update_nvd(years=nvd_years, force=args.update_nvd_force)
         return
 
-    selected_modes = sum(1 for enabled in (args.batch, args.continue_mode, args.classify, args.stats, args.retry_http_failed) if enabled)
+    selected_modes = sum(1 for enabled in (
+        args.batch,
+        args.continue_mode,
+        args.classify,
+        args.stats,
+        args.retry_http_failed,
+        args.env_preflight,
+    ) if enabled)
     if selected_modes > 1:
-        raise SystemExit("--batch、--continue、--classify、--stats 和 --retry-http-failed 不能同时使用")
+        raise SystemExit("--batch、--continue、--classify、--stats、--retry-http-failed 和 --env-preflight 不能同时使用")
+
+    if args.env_preflight:
+        if args.terminals is not None or args.local_container or args.report:
+            raise SystemExit("--env-preflight 不需要 --terminals、--local-container 或 --report")
+        preflight_file = args.file or args.cve_id
+        run_env_preflight(preflight_file, args.start, args.end)
+        return
 
     if args.batch:
         batch_file = args.file or args.cve_id

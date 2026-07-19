@@ -10,6 +10,8 @@ load_dotenv()
 
 
 def _get_proxy() -> str:
+    if os.getenv("CVE_HUNTER_DISABLE_PROXY", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return ""
     return (
         os.getenv("HTTPS_PROXY")
         or os.getenv("HTTP_PROXY")
@@ -101,6 +103,9 @@ class Config:
     )
     environment_healthcheck_timeout: int = field(
         default_factory=lambda: _int_env("ENVIRONMENT_HEALTHCHECK_TIMEOUT", 90)
+    )
+    environment_auto_cleanup: bool = field(
+        default_factory=lambda: _bool_env("ENVIRONMENT_AUTO_CLEANUP", True)
     )
     # Metarget 会修改宿主机 Docker/Kubernetes/内核，必须单独显式授权。
     metarget_execution_enabled: bool = field(

@@ -1,8 +1,17 @@
 import unittest
 from datetime import datetime
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
-from tools.local_http2pcap_service import _dated_output_path, _safe_capture_name, _target_host
+from tools.local_http2pcap_service import (
+    _dated_output_path,
+    _nuclei_findings,
+    _pending_output_path,
+    _run_nuclei_poc,
+    _safe_capture_name,
+    _target_host,
+)
 
 
 class LocalHttp2PcapServiceTests(unittest.TestCase):
@@ -25,6 +34,53 @@ class LocalHttp2PcapServiceTests(unittest.TestCase):
     def test_capture_path_is_grouped_by_test_date(self):
         path = _dated_output_path(Path("data/cve/pcaps"), "capture.pcap", datetime(2026, 7, 15, 9, 30))
         self.assertEqual(path, Path("data/cve/pcaps/2026-07-15/capture.pcap"))
+
+    def test_pending_capture_path_does_not_overwrite_successful_capture(self):
+        path = _pending_output_path(
+            Path("data/cve/pcaps"),
+            "CVE-2024-23334.pcap",
+            datetime(2026, 7, 15, 9, 30),
+        )
+        self.assertEqual(path, Path("data/cve/pcaps/.pending/2026-07-15/CVE-2024-23334.pcap"))
+
+    def test_nuclei_findings_only_returns_json_objects(self):
+        output = 'warning\n{"template-id":"CVE-2024-23334"}\n[]\n{"matched-at":"http://127.0.0.1"}'
+        self.assertEqual(len(_nuclei_findings(output)), 2)
+
+    def test_nuclei_poc_reports_local_match(self):
+        template = """id: CVE-2024-23334
+info:
+  name: local test
+  severity: high
+http:
+  - method: GET
+    path:
+      - '{{BaseURL}}/poc'
+"""
+        completed = SimpleNamespace(
+            returncode=0,
+            stderr="",
+            stdout='{"template-id":"CVE-2024-23334","status-code":200,"response":"HTTP/1.1 200 OK\\r\\n\\r\\nhit"}\n',
+        )
+        with (
+            patch("tools.local_http2pcap_service._find_tool", return_value="nuclei") as find_tool,
+            patch("tools.local_http2pcap_service.subprocess.run", return_value=completed) as run,
+        ):
+            result = _run_nuclei_poc(template, "http://127.0.0.1:8080")
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result["matched"])
+        self.assertEqual(result["status_code"], 200)
+        self.assertIn("hit", result["body"])
+        find_tool.assert_called_once_with("nuclei", "")
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("-u") + 1], "http://127.0.0.1:8080")
+        self.assertIn("-no-interactsh", command)
+        self.assertEqual(command[command.index("-pt") + 1], "http")
+
+    def test_nuclei_poc_rejects_non_http_template(self):
+        with self.assertRaisesRegex(ValueError, "仅执行包含 http 请求"):
+            _run_nuclei_poc("id: local-test\ndns: []\n", "http://127.0.0.1:8080")
 
 
 if __name__ == "__main__":
