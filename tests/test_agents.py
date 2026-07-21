@@ -235,6 +235,34 @@ class AgentTests(unittest.TestCase):
 
         self.assertEqual(target, "http://127.0.0.1:8080")
 
+    def test_compose_with_free_host_ports_remaps_busy_port(self):
+        from cve_hunter.agents import _compose_with_free_host_ports
+
+        with tempfile.TemporaryDirectory() as tmp:
+            compose = Path(tmp) / "docker-compose.yml"
+            compose.write_text(
+                "version: '2'\n"
+                "services:\n"
+                "  mysql:\n"
+                "    image: vulhub/mysql:5.5.23\n"
+                "    ports:\n"
+                "      - \"3306:3306\"\n",
+                encoding="utf-8",
+            )
+            with (
+                patch("cve_hunter.agents._is_host_port_free", return_value=False),
+                patch("cve_hunter.agents._allocate_free_host_port", return_value=13306),
+            ):
+                new_path, remap, target = _compose_with_free_host_ports(compose)
+
+            self.assertNotEqual(new_path, compose)
+            self.assertTrue(new_path.is_file())
+            self.assertEqual(remap, {"3306": "13306"})
+            self.assertEqual(target, "tcp://127.0.0.1:13306")
+            text = new_path.read_text(encoding="utf-8")
+            self.assertIn("13306:3306", text)
+            self.assertNotIn("version", text.split("services", 1)[0])
+
     def test_teardown_owned_compose_environment(self):
         with tempfile.TemporaryDirectory() as tmp:
             compose = Path(tmp) / "docker-compose.yml"

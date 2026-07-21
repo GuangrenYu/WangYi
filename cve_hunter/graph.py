@@ -50,6 +50,8 @@ from cve_hunter.tools.web_search import search_web
 from cve_hunter.verification import evaluate_success, execute_candidate
 from cve_hunter.tools.http_sender import finalize_capture
 from cve_hunter.evidence import (
+    FAILURE_CLASS_NONE,
+    build_version_evidence,
     classify_failure,
     derive_success_tier,
     write_repro_bundle,
@@ -417,6 +419,23 @@ def node_local_kb_search(state: CVEState) -> dict:
                         password=password or "",
                         database=database,
                     )
+                    # 多会话同样覆盖 host/port，保留各会话自身账号
+                    sessions = list(spec.get("sessions") or [])
+                    if sessions:
+                        rewritten_sessions = []
+                        for session in sessions:
+                            if not isinstance(session, dict):
+                                continue
+                            item = dict(session)
+                            item["target"] = resolve_database_target(
+                                engine=engine,
+                                env_target=str(env_target),
+                                user=str(item.get("user") or user),
+                                password=str(item.get("password") if item.get("password") is not None else password),
+                                database=str(item.get("database") or database),
+                            )
+                            rewritten_sessions.append(item)
+                        spec["sessions"] = rewritten_sessions
                 candidate = {
                     "kind": "execution_spec",
                     "source": source_label,
@@ -449,7 +468,14 @@ def node_local_kb_search(state: CVEState) -> dict:
                 ))
                 return updates
 
-            # trickest-cve 命中但未提取到 HTTP/SQL PoC，保留 github_repos 供参考
+            # trickest-cve 命中但未提取到 HTTP/SQL PoC
+            if _local_container_skip_remote(state):
+                console.print("  [yellow]⚠ 本地 KB 无可用 HTTP/SQL PoC，local-container 模式跳过远程搜索[/]")
+                updates.update(
+                    make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND))
+                )
+                updates["current_phase"] = "generate_report"
+                return updates
             console.print("  [yellow]⚠ 本地 KB 无可用 HTTP/SQL PoC，继续远程搜索[/]")
             updates["current_phase"] = "reference_analysis"
             return updates
@@ -460,6 +486,14 @@ def node_local_kb_search(state: CVEState) -> dict:
         console.print("  [dim]本地知识库未命中[/]")
     except Exception as e:
         console.print(f"  [yellow]⚠ 本地知识库搜索异常: {e}[/]")
+
+    if _local_container_skip_remote(state):
+        console.print("  [yellow]⚠ local-container 模式：无本地 PoC，跳过远程搜索[/]")
+        return {
+            "phases_tried": state.phases_tried + ["local_kb_search"],
+            "current_phase": "generate_report",
+            **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
+        }
 
     return {
         "phases_tried": state.phases_tried + ["local_kb_search"],
@@ -859,6 +893,9 @@ def node_verify_poc(state: CVEState) -> dict:
     target = environment.get("target_host") or cfg.target_ip
     console.print(f"  准备验证候选，目标 {target}...")
     max_requests = int(getattr(cfg, "max_requests_per_cve", 20) or 0)
+    if state.local_container_mode:
+        local_cap = int(getattr(cfg, "local_container_max_requests_per_cve", 6) or 6)
+        max_requests = min(max_requests, local_cap) if max_requests > 0 else local_cap
     if max_requests > 0 and len(state.attempt_history) >= max_requests:
         result = {
             "success": False,
@@ -1154,7 +1191,7 @@ def node_generate_report(state: CVEState) -> dict:
         data={"teardown_result": teardown_result},
     )
 
-    failure_class = classify_failure(final_code) if final_status != "SUCCESS" else "none"
+    failure_class = classify_failure(final_code) if final_status != "SUCCESS" else FAILURE_CLASS_NONE
     # First pass tier without bundle completeness.
     success_tier = derive_success_tier(
         status_code=final_code,
@@ -1215,6 +1252,14 @@ def node_generate_report(state: CVEState) -> dict:
         with open(output_dir / "poc.yaml", "w", encoding="utf-8") as f:
             f.write(state.poc_nuclei_yaml)
 
+    version_evidence = build_version_evidence(
+        cve_id=state.cve_id,
+        nvd_description=state.nvd_description or "",
+        attack_environment=attack_environment,
+        execution_spec=getattr(state, "execution_spec", {}) or {},
+        executor_result=state.executor_result,
+        oracle_result=state.oracle_result,
+    )
     repro_bundle = write_repro_bundle(
         output_dir,
         cve_id=state.cve_id,
@@ -1236,6 +1281,7 @@ def node_generate_report(state: CVEState) -> dict:
         milestones=milestones,
         attempt_history=state.attempt_history,
         execution_spec=getattr(state, "execution_spec", {}) or {},
+        version_evidence=version_evidence,
     )
     # Promote to L4 when bundle is complete after L2/L3 evidence.
     success_tier = derive_success_tier(
@@ -1293,6 +1339,7 @@ def node_generate_report(state: CVEState) -> dict:
         "failure_class": failure_class,
         "protocol": getattr(state, "protocol", "") or ("http" if state.is_http_vuln else "unsupported"),
         "execution_spec": getattr(state, "execution_spec", {}) or {},
+        "version_evidence": version_evidence,
         "repro_bundle_path": repro_bundle.get("path", ""),
         "repro_bundle_complete": bool(repro_bundle.get("complete")),
         "repro_bundle": repro_bundle,
@@ -1721,12 +1768,42 @@ def _extract_http_requests(text: str, cve_id: str) -> list[str]:
     return extract_http_requests(text)
 
 
+def _local_container_skip_remote(state: CVEState) -> bool:
+    """local-container 批测默认禁止远程搜索/外链抽取（可用配置打开）。"""
+    if not state.local_container_mode:
+        return False
+    return not bool(getattr(cfg, "local_container_allow_remote_search", False))
+
+
+def _has_local_kb_candidates(state: CVEState) -> bool:
+    local_sources = {
+        "local_kb_custom",
+        "local_kb_vulhub",
+        "local_kb_vulhub_sql",
+        "local_kb_pcap",
+        "local_kb_trickest",
+        "local_kb_trickest_sql",
+    }
+    for candidate in state.poc_candidates or []:
+        source = str(candidate.get("source") or "")
+        if source in local_sources or source.startswith("local_kb"):
+            return True
+    return False
+
+
 def _next_phase_after_verify(state: CVEState) -> str:
     """验证失败后确定下一个阶段。"""
-    phase_order = [
-        "local_kb_search", "reference_analysis", "poc_from_refs", "nuclei_search",
-        "exploitdb_search", "imfht_search", "web_search",
-    ]
+    # local-container：已有本地候选则不再远程发散；无本地候选时仅允许本地 nuclei
+    if _local_container_skip_remote(state):
+        if _has_local_kb_candidates(state):
+            console.print("  [dim]local-container：本地候选已用尽，跳过远程搜索[/]")
+            return "generate_report"
+        phase_order = ["local_kb_search", "nuclei_search"]
+    else:
+        phase_order = [
+            "local_kb_search", "reference_analysis", "poc_from_refs", "nuclei_search",
+            "exploitdb_search", "imfht_search", "web_search",
+        ]
 
     tried = set(state.phases_tried)
     for phase in phase_order:
@@ -1784,12 +1861,19 @@ def route_after_local_kb(state: CVEState) -> str:
     """本地 KB 搜索后路由：找到 PoC 则直接验证，否则继续常规流程。"""
     if state.current_phase == "verify_poc":
         return "verify_poc"
+    if state.current_phase == "generate_report":
+        return "generate_report"
     # 数据库候选即使 phase 字段异常，只要已有 execution_spec 也直接验证
     if getattr(state, "protocol", "") == PROTOCOL_DATABASE and (
         getattr(state, "execution_spec", None)
         or any(isinstance(c.get("execution_spec"), dict) for c in (state.poc_candidates or []))
     ):
         return "verify_poc"
+    # local-container 且跳过远程：无候选则直接归档，不进入 reference/web_search
+    if _local_container_skip_remote(state):
+        if state.poc_candidates:
+            return "verify_poc"
+        return "generate_report"
     return "reference_analysis"
 
 

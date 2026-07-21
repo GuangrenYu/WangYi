@@ -9,6 +9,7 @@ from cve_hunter.evidence import (
     SUCCESS_TIER_L2,
     SUCCESS_TIER_L3,
     SUCCESS_TIER_L4,
+    build_version_evidence,
     classify_failure,
     derive_success_tier,
     write_repro_bundle,
@@ -66,6 +67,22 @@ class EvidenceHelperTests(unittest.TestCase):
             ),
             SUCCESS_TIER_L4,
         )
+
+    def test_build_version_evidence_claimed_and_image(self):
+        evidence = build_version_evidence(
+            cve_id="CVE-2019-9193",
+            nvd_description="In PostgreSQL 9.3 through 11.2, the COPY TO/FROM PROGRAM function allows ...",
+            attack_environment={
+                "compose_file": "third_party/vulhub/postgres/CVE-2019-9193/docker-compose.yml",
+                "target_url": "tcp://127.0.0.1:5432",
+            },
+            execution_spec={"engine": "postgres"},
+            executor_result={"body": "uid=999(postgres)", "engine": "postgres"},
+        )
+        self.assertTrue(evidence["claimed"]["version_ranges"])
+        self.assertIn("9.3-11.2", evidence["claimed"]["version_ranges"])
+        self.assertTrue(any("vulhub/postgres" in tag for tag in evidence["environment"]["image_tags"]))
+        self.assertEqual(evidence["comparison"]["status"], "claimed_and_verified")
 
     def test_write_repro_bundle_for_target_oracle_success(self):
         with tempfile.TemporaryDirectory() as tmp:

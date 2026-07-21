@@ -1,0 +1,13 @@
+id: local-test
+info:
+  name: local
+  author: cve-hunter
+  severity: info
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/api/health"
+    matchers:
+      - type: word
+        words:
+          - status

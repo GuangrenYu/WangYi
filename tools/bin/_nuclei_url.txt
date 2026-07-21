@@ -1,0 +1,2 @@
+https://github.com/projectdiscovery/nuclei/releases/download/v3.11.0/nuclei_3.11.0_windows_amd64.zip
+nuclei_3.11.0_windows_amd64.zip

@@ -34,13 +34,53 @@ def send_poc_and_capture(
 ) -> dict:
     """发送 PoC 并抓包。
 
-    优先使用 http2pcap 服务；若不可用则使用内置方式。
+    优先使用 http2pcap 服务；服务不可达/异常时回退内置 raw socket（本地靶场）。
     """
     if cfg.http2pcap_url:
         if nuclei_yaml:
-            return _send_via_http2pcap_nuclei(nuclei_yaml, target_url, cve_id)
-        return _send_via_http2pcap(raw_http, cve_id)
+            result = _send_via_http2pcap_nuclei(nuclei_yaml, target_url, cve_id)
+            # nuclei 依赖服务侧执行；不可达时无法可靠回退 nuclei 语义
+            if result.get("success") or not _looks_like_http2pcap_unreachable(result):
+                return result
+            if raw_http:
+                fallback = _send_builtin(raw_http, target_url, cve_id)
+                fallback["http2pcap_fallback"] = True
+                fallback["http2pcap_error"] = result.get("error", "")
+                return fallback
+            result.setdefault("error_type", "http2pcap_unreachable")
+            return result
+
+        result = _send_via_http2pcap(raw_http, cve_id)
+        if result.get("success") or not _looks_like_http2pcap_unreachable(result):
+            return result
+        # 服务挂掉时不要把整个 HTTP 批测打成「发包服务失败」
+        fallback = _send_builtin(raw_http, target_url, cve_id)
+        fallback["http2pcap_fallback"] = True
+        fallback["http2pcap_error"] = result.get("error", "")
+        return fallback
     return _send_builtin(raw_http, target_url, cve_id)
+
+
+def _looks_like_http2pcap_unreachable(result: dict) -> bool:
+    """Detect transport-level failure talking to http2pcap service itself."""
+    if result.get("success"):
+        return False
+    err = str(result.get("error") or "").lower()
+    markers = (
+        "10061",
+        "actively refused",
+        "connection refused",
+        "connecterror",
+        "connect timeout",
+        "timed out",
+        "name or service not known",
+        "nodename nor servname",
+        "failed to establish a new connection",
+        "remote protocol error",
+        "server disconnected",
+        "http2pcap 返回非 json",
+    )
+    return any(marker in err for marker in markers)
 
 
 def _is_local_raw_target(raw_http: str, target_url: str = "") -> bool:
@@ -81,7 +121,7 @@ def _send_via_http2pcap(raw_http: str, cve_id: str = "") -> dict:
             "error_type": data.get("error_type", ""),
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "error_type": "http2pcap_unreachable"}
 
 
 def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str, cve_id: str = "") -> dict:
@@ -109,7 +149,7 @@ def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str, cve_id: str =
             "error_type": data.get("error_type", ""),
         }
     except Exception as e:
-        return {"success": False, "error": str(e)}
+        return {"success": False, "error": str(e), "error_type": "http2pcap_unreachable"}
 
 
 def _post_http2pcap(path: str, *, json: dict, timeout: int) -> dict:
@@ -118,7 +158,14 @@ def _post_http2pcap(path: str, *, json: dict, timeout: int) -> dict:
     http2pcap/IPS 是内网服务，不能受 .env 中用于外部情报源的 HTTP_PROXY 影响。
     """
     url = f"{cfg.http2pcap_url.rstrip('/')}{path}"
-    resp = httpx.post(url, json=json, timeout=timeout, trust_env=False)
+    # 连接超时单独缩短，避免服务挂掉时卡满整个 request_timeout
+    connect_timeout = min(5.0, float(timeout))
+    resp = httpx.post(
+        url,
+        json=json,
+        timeout=httpx.Timeout(timeout, connect=connect_timeout),
+        trust_env=False,
+    )
 
     try:
         return resp.json()
@@ -273,7 +320,14 @@ def _capture_output_path(host: str, cve_id: str = "", now: datetime | None = Non
 
 
 def finalize_capture(pcap_file_path: str, *, keep: bool) -> str:
-    """Promote a pending local capture on validation success, otherwise remove it."""
+    """Promote a pending local capture on validation success, otherwise remove it.
+
+    Destination filename is always normalised to ``CVE-XXXX-XXXXX.pcap`` so that
+    database-path captures (whose pending name carries port/timestamp/interface
+    suffixes like ``CVE-2012-2122_database_p3622_151341_if1.pcap``) end up with
+    the same clean name as HTTP-path captures.  If the destination already exists
+    the larger file wins (more data kept).
+    """
     if not pcap_file_path:
         return ""
     path = Path(pcap_file_path)
@@ -288,9 +342,24 @@ def finalize_capture(pcap_file_path: str, *, keep: bool) -> str:
         path.unlink(missing_ok=True)
         return ""
     relative = resolved.relative_to(pending_root)
-    final_path = root / relative.parent / relative.name
+    # Normalise: strip port/timestamp/interface suffixes → CVE-XXXX-XXXXX.pcap
+    cve_match = re.search(r"CVE-\d{4}-\d{4,}", relative.stem, re.I)
+    final_name = f"{cve_match.group(0).upper()}.pcap" if cve_match else relative.name
+    final_path = root / relative.parent / final_name
     final_path.parent.mkdir(parents=True, exist_ok=True)
-    path.replace(final_path)
+    # Collision: keep the file with more data
+    if final_path.exists():
+        try:
+            existing_size = final_path.stat().st_size
+            incoming_size = path.stat().st_size if path.exists() else 0
+        except OSError:
+            existing_size = incoming_size = 0
+        if incoming_size > existing_size:
+            path.replace(final_path)
+        else:
+            path.unlink(missing_ok=True)
+    else:
+        path.replace(final_path)
     return str(final_path)
 
 

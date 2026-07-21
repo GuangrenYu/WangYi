@@ -107,6 +107,14 @@ class Config:
     environment_auto_cleanup: bool = field(
         default_factory=lambda: _bool_env("ENVIRONMENT_AUTO_CLEANUP", True)
     )
+    # 回收 compose 后是否删除该环境用到的镜像（释放磁盘；默认开，省空间）
+    environment_remove_images_after_run: bool = field(
+        default_factory=lambda: _bool_env("ENVIRONMENT_REMOVE_IMAGES_AFTER_RUN", True)
+    )
+    # 删除镜像时是否跳过 DB 金标准相关镜像（避免反复 pull）
+    environment_preserve_db_images: bool = field(
+        default_factory=lambda: _bool_env("ENVIRONMENT_PRESERVE_DB_IMAGES", True)
+    )
     # Metarget 会修改宿主机 Docker/Kubernetes/内核，必须单独显式授权。
     metarget_execution_enabled: bool = field(
         default_factory=lambda: _bool_env("METARGET_EXECUTION_ENABLED", False)
@@ -129,6 +137,14 @@ class Config:
     target_allowlist: list[str] = field(default_factory=lambda: _csv_env("TARGET_ALLOWLIST"))
     max_requests_per_cve: int = field(default_factory=lambda: _int_env("MAX_REQUESTS_PER_CVE", 20))
     max_candidates_per_cve: int = field(default_factory=lambda: _int_env("MAX_CANDIDATES_PER_CVE", 50))
+    # --local-container 批测：默认不走远程搜索/外链抽取，优先 local_kb + 本地 nuclei
+    local_container_allow_remote_search: bool = field(
+        default_factory=lambda: _bool_env("LOCAL_CONTAINER_ALLOW_REMOTE_SEARCH", False)
+    )
+    # local-container 下验证请求上限（更严，避免单 CVE 拖满超时）
+    local_container_max_requests_per_cve: int = field(
+        default_factory=lambda: _int_env("LOCAL_CONTAINER_MAX_REQUESTS_PER_CVE", 6)
+    )
 
     # HTTP/HTTPS 代理
     proxy: str = field(default_factory=_get_proxy)

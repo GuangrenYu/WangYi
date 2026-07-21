@@ -1084,6 +1084,17 @@ def _start_compose_environment(candidate: dict[str, Any]) -> dict[str, Any]:
     if not compose_path.is_file():
         return {"success": False, "error": f"compose 文件不存在: {compose_file}"}
 
+    # 宿主机端口被占用时写临时 compose，改映到空闲端口（如本机 mysqld 占用 3306）
+    compose_path, port_remap, remapped_target_url = _compose_with_free_host_ports(compose_path)
+    if remapped_target_url:
+        candidate = dict(candidate)
+        candidate["target_url"] = remapped_target_url
+        candidate["target_host"] = _target_host_from_url(remapped_target_url)
+        candidate["port_remap"] = port_remap
+
+    # Windows 检出的 init.sh 可能是 CRLF，entrypoint 会直接失败
+    _normalize_compose_shell_scripts(compose_path.parent)
+
     project_name = str(candidate.get("compose_project_name") or _new_compose_project_name(compose_path))
     compose_args = [*command, "-p", project_name, "-f", str(compose_path)]
 
@@ -1231,7 +1242,7 @@ def _start_compose_environment(candidate: dict[str, Any]) -> dict[str, Any]:
             cleanup=cleanup,
         )
 
-    return {
+    result = {
         "success": True,
         "started_by_orchestrator": True,
         "preexisting_environment": False,
@@ -1241,6 +1252,10 @@ def _start_compose_environment(candidate: dict[str, Any]) -> dict[str, Any]:
         "initialization": initialization,
         "healthcheck": healthcheck,
     }
+    if port_remap:
+        result["port_remap"] = port_remap
+        result["compose_file"] = str(compose_path)
+    return result
 
 
 def register_owned_compose_project(project_name: str, compose_file: str | Path) -> None:
@@ -1357,6 +1372,7 @@ def _teardown_compose_environment(environment: dict[str, Any]) -> dict[str, Any]
     if not project_name:
         return {"success": False, "error": "环境缺少独立 Compose project name，拒绝回收默认项目"}
 
+    images_before = _compose_image_refs(compose_path)
     output = _cleanup_compose_project(command, compose_path, project_name)
     if output["returncode"] != 0:
         return {
@@ -1364,7 +1380,121 @@ def _teardown_compose_environment(environment: dict[str, Any]) -> dict[str, Any]
             "error": output["stderr"] or output["stdout"],
             "commands": [output],
         }
-    return {"success": True, "project_name": project_name, "commands": [output]}
+
+    image_cleanup: dict[str, Any] = {"skipped": True, "removed": [], "kept": [], "errors": []}
+    if getattr(cfg, "environment_remove_images_after_run", True):
+        image_cleanup = remove_compose_images(
+            images_before,
+            preserve_db=bool(getattr(cfg, "environment_preserve_db_images", True)),
+            project_name=project_name,
+        )
+        # 删除结果写入 teardown，由调用方日志展示，避免 agents 依赖 rich console
+    return {
+        "success": True,
+        "project_name": project_name,
+        "commands": [output],
+        "image_cleanup": image_cleanup,
+    }
+
+
+def _compose_image_refs(compose_path: Path) -> list[str]:
+    """Read image references from a compose file."""
+    try:
+        data = yaml.safe_load(compose_path.read_text(encoding="utf-8", errors="ignore")) or {}
+    except Exception:
+        return []
+    services = data.get("services") if isinstance(data, dict) else None
+    if not isinstance(services, dict):
+        return []
+    images: list[str] = []
+    for service in services.values():
+        if isinstance(service, dict) and service.get("image"):
+            images.append(str(service["image"]).strip())
+    return images
+
+
+_DB_IMAGE_MARKERS = (
+    "mysql",
+    "mariadb",
+    "postgres",
+    "redis",
+    "mongo",
+    "h2database",
+    "h2",
+)
+
+
+def remove_compose_images(
+    images: list[str],
+    *,
+    preserve_db: bool = True,
+    project_name: str = "",
+) -> dict[str, Any]:
+    """Delete images used by a finished CVE environment to free disk.
+
+    Also removes dangling/project-built images matching the compose project name.
+    """
+    removed: list[str] = []
+    kept: list[str] = []
+    errors: list[str] = []
+    for image in images:
+        if not image:
+            continue
+        lower = image.lower()
+        if preserve_db and any(marker in lower for marker in _DB_IMAGE_MARKERS):
+            kept.append(image)
+            continue
+        result = _run_environment_command(
+            ["docker", "rmi", "-f", image], cwd=Path("."), timeout=120
+        )
+        err = (result.get("stderr") or result.get("stdout") or "").strip()
+        # docker rmi -f on missing image can still return 0; treat "No such image" as not removed
+        if result.get("returncode") == 0 and "no such image" not in err.lower():
+            removed.append(image)
+        else:
+            errors.append(f"{image}: {err[:160] or 'rmi failed'}")
+            kept.append(image)
+
+    # Project-local build tags like cvehunter-cve-xxxx-...
+    if project_name:
+        list_out = _run_environment_command(
+            ["docker", "images", "--format", "{{.Repository}}:{{.Tag}}"],
+            cwd=Path("."),
+            timeout=60,
+        )
+        for line in (list_out.get("stdout") or "").splitlines():
+            tag = line.strip()
+            if not tag or tag == "<none>:<none>":
+                continue
+            if project_name.lower() in tag.lower() or (
+                tag.lower().startswith("cvehunter-") and any(
+                    part and part in tag.lower()
+                    for part in project_name.lower().split("-")
+                    if len(part) >= 8
+                )
+            ):
+                if preserve_db and any(marker in tag.lower() for marker in _DB_IMAGE_MARKERS):
+                    kept.append(tag)
+                    continue
+                result = _run_environment_command(
+                    ["docker", "rmi", "-f", tag], cwd=Path("."), timeout=120
+                )
+                if result.get("returncode") == 0:
+                    removed.append(tag)
+                else:
+                    errors.append(tag)
+
+    # dangling layers
+    _run_environment_command(
+        ["docker", "image", "prune", "-f"], cwd=Path("."), timeout=120
+    )
+
+    return {
+        "skipped": False,
+        "removed": sorted(set(removed)),
+        "kept": sorted(set(kept)),
+        "errors": errors[:20],
+    }
 
 
 def _new_compose_project_name(compose_path: Path) -> str:
@@ -1847,6 +1977,137 @@ def _guess_target_url_from_compose(path: Path) -> str:
             scheme = "tcp"
         return f"{scheme}://127.0.0.1:{published}"
     return ""
+
+
+def _normalize_compose_shell_scripts(directory: Path) -> list[str]:
+    """把 compose 目录内 .sh 的 CRLF 转为 LF，避免容器 entrypoint 报 $'\\r'。"""
+    fixed: list[str] = []
+    root = Path(directory)
+    if not root.is_dir():
+        return fixed
+    for path in root.rglob("*.sh"):
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if b"\r\n" not in data and not data.endswith(b"\r"):
+            continue
+        try:
+            path.write_bytes(data.replace(b"\r\n", b"\n").replace(b"\r", b"\n"))
+            fixed.append(str(path))
+        except OSError:
+            continue
+    return fixed
+
+
+def _is_host_port_free(port: int) -> bool:
+    """Check whether a TCP host port can be bound on 0.0.0.0."""
+    try:
+        port_i = int(port)
+    except (TypeError, ValueError):
+        return False
+    if port_i <= 0 or port_i > 65535:
+        return False
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("0.0.0.0", port_i))
+            return True
+        except OSError:
+            return False
+
+
+def _allocate_free_host_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _rewrite_compose_port_mapping(port: Any, new_host: str) -> Any:
+    """Rewrite only the host/published side of a compose port mapping."""
+    if isinstance(port, int):
+        return f"{new_host}:{port}"
+    if isinstance(port, str):
+        text = port.strip()
+        proto = ""
+        if "/" in text:
+            text, proto = text.rsplit("/", 1)
+            proto = f"/{proto}"
+        parts = text.split(":")
+        if len(parts) == 1:
+            return f"{new_host}:{parts[0]}{proto}"
+        if len(parts) == 2:
+            # host:container or ip:container — replace host side
+            return f"{new_host}:{parts[1]}{proto}"
+        if len(parts) == 3:
+            # ip:host:container
+            return f"{parts[0]}:{new_host}:{parts[2]}{proto}"
+        return f"{new_host}:{parts[-1]}{proto}"
+    if isinstance(port, dict):
+        rewritten = dict(port)
+        rewritten["published"] = int(new_host) if str(new_host).isdigit() else new_host
+        return rewritten
+    return port
+
+
+def _compose_with_free_host_ports(compose_path: Path) -> tuple[Path, dict[str, str], str]:
+    """若 compose 声明的宿主机端口已被占用，写临时 compose 并改映到空闲端口。
+
+    Returns:
+        (compose_path_to_use, old_host_port -> new_host_port, remapped_target_url or "")
+    """
+    try:
+        data = yaml.safe_load(compose_path.read_text(encoding="utf-8", errors="ignore")) or {}
+    except Exception:
+        return compose_path, {}, ""
+    if not isinstance(data, dict):
+        return compose_path, {}, ""
+    services = data.get("services")
+    if not isinstance(services, dict):
+        return compose_path, {}, ""
+
+    port_remap: dict[str, str] = {}
+    changed = False
+    for service in services.values():
+        if not isinstance(service, dict):
+            continue
+        ports = service.get("ports")
+        if not isinstance(ports, list) or not ports:
+            continue
+        new_ports: list[Any] = []
+        for port in ports:
+            published = _published_port(port)
+            if not published or not str(published).isdigit():
+                new_ports.append(port)
+                continue
+            if _is_host_port_free(int(published)):
+                new_ports.append(port)
+                continue
+            # 已占用：分配空闲端口（同 old 只 remap 一次，保持一致）
+            if published in port_remap:
+                new_host = port_remap[published]
+            else:
+                new_host = str(_allocate_free_host_port())
+                port_remap[published] = new_host
+            new_ports.append(_rewrite_compose_port_mapping(port, new_host))
+            changed = True
+        if changed:
+            service["ports"] = new_ports
+
+    if not changed:
+        return compose_path, {}, ""
+
+    # 写到 compose 同目录，便于相对 volume 路径仍有效
+    temp_name = f".cvehunter-ports-{uuid.uuid4().hex[:8]}.yml"
+    temp_path = compose_path.parent / temp_name
+    # 基于原文件结构 dump；去掉已废弃 version 以免警告
+    data.pop("version", None)
+    temp_path.write_text(
+        yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    remapped_target = _guess_target_url_from_compose(temp_path)
+    return temp_path, port_remap, remapped_target
 
 
 def _compose_port_score(service_name: str, port: Any) -> int:

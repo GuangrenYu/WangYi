@@ -38,13 +38,21 @@ from rich.markdown import Markdown
 from rich.table import Table
 
 from cve_hunter.config import cfg
+from cve_hunter.evidence import (
+    FAILURE_CLASS_INFRA,
+    normalize_failure_class,
+    normalize_success_tier,
+)
 from cve_hunter.status_codes import (
     BATCH_EXCEPTION,
     CAPTURE_SUCCESS,
+    DB_ORACLE_SUCCESS,
     NOT_HTTP_VULN,
     PARAMETER_ERROR,
+    PROTOCOL_UNSUPPORTED,
     STATUS_DESCRIPTIONS,
     TARGET_ORACLE_SUCCESS,
+    normalize_status_code,
 )
 
 console = Console()
@@ -527,7 +535,7 @@ def execute_cve_as_batch_result(
         generic_ips_match_count = 0
         success_level = ""
         success_tier = ""
-        failure_class = "infrastructure"
+        failure_class = FAILURE_CLASS_INFRA
         repro_bundle_path = ""
         repro_bundle_complete = False
         milestones = {}
@@ -919,22 +927,28 @@ def print_batch_summary(results: list[BatchResult], elapsed_seconds: float) -> N
 
 def is_non_http_result(result: dict) -> bool:
     """根据批量结果状态码判断是否为非 HTTP 漏洞。"""
-    return str(result.get("status_code", "")).upper() == NOT_HTTP_VULN
+    code = normalize_status_code(str(result.get("status_code") or ""))
+    return code in {NOT_HTTP_VULN, PROTOCOL_UNSUPPORTED}
 
 
 def is_retry_http_failed_result(result: dict) -> bool:
     """二次核验处理 HTTP 类型失败结果。"""
-    status_code = str(result.get("status_code", "")).upper()
+    status_code = normalize_status_code(str(result.get("status_code") or ""))
     return (
         not result.get("passed")
-        and status_code not in {NOT_HTTP_VULN, PARAMETER_ERROR}
+        and status_code not in {NOT_HTTP_VULN, PROTOCOL_UNSUPPORTED, PARAMETER_ERROR}
         and status_code != ""
     )
 
 
 def is_retry_passed_result(result: dict) -> bool:
     """正确数据核验处理历史通过记录，用于清理旧的 IPS 泛化误判。"""
-    return bool(result.get("passed")) and str(result.get("status_code", "")).upper() in {CAPTURE_SUCCESS, TARGET_ORACLE_SUCCESS}
+    status_code = normalize_status_code(str(result.get("status_code") or ""))
+    return bool(result.get("passed")) and status_code in {
+        CAPTURE_SUCCESS,
+        TARGET_ORACLE_SUCCESS,
+        DB_ORACLE_SUCCESS,
+    }
 
 
 def parse_retry_status_codes(values: list[str] | None) -> set[str]:
@@ -942,15 +956,26 @@ def parse_retry_status_codes(values: list[str] | None) -> set[str]:
     codes: set[str] = set()
     for value in values or []:
         for part in re.split(r"[\s,，]+", value):
-            code = part.strip().upper()
-            if code:
-                codes.add(code)
+            raw = part.strip()
+            if not raw:
+                continue
+            # 同时保留原样与规范化后的中文码，兼容历史英文筛选
+            codes.add(raw.upper())
+            normalized = normalize_status_code(raw)
+            if normalized:
+                codes.add(normalized)
+                codes.add(normalized.upper())
     return codes
 
 
 def validate_retry_status_codes(codes: set[str]) -> None:
     """对未知状态码给出提示，但允许兼容历史 JSON 中的自定义状态码。"""
-    unknown = sorted(code for code in codes if code not in STATUS_DESCRIPTIONS)
+    known = set(STATUS_DESCRIPTIONS) | {key.upper() for key in STATUS_DESCRIPTIONS}
+    # 历史英文别名也视为已知
+    from cve_hunter.status_codes import LEGACY_STATUS_ALIASES
+
+    known |= set(LEGACY_STATUS_ALIASES) | {key.upper() for key in LEGACY_STATUS_ALIASES}
+    unknown = sorted(code for code in codes if code not in known and normalize_status_code(code) not in STATUS_DESCRIPTIONS)
     if unknown:
         console.print(
             "[yellow]提示: 以下状态码不在当前内置列表中，将按原样匹配历史记录:[/yellow] "
@@ -962,7 +987,10 @@ def is_retry_status_code_result(result: dict, retry_status_codes: set[str] | Non
     """指定状态码核验：只按 status_code 精确筛选，不额外判断 passed。"""
     if not retry_status_codes:
         return False
-    return str(result.get("status_code", "")).upper() in retry_status_codes
+    raw = str(result.get("status_code") or "")
+    normalized = normalize_status_code(raw)
+    candidates = {raw, raw.upper(), normalized, normalized.upper()}
+    return any(item in retry_status_codes for item in candidates if item)
 
 
 def is_retry_target_result(result: dict, retry_mode: str, retry_status_codes: set[str] | None = None) -> bool:
@@ -1285,8 +1313,11 @@ def run_batch_stats() -> None:
     total_http = 0
     total_non_http = 0
     status_counter: Counter[str] = Counter()
+    failure_class_counter: Counter[str] = Counter()
+    success_tier_counter: Counter[str] = Counter()
     source_counter: Counter[str] = Counter()
     success_level_counter: Counter[str] = Counter()
+    protocol_counter: Counter[str] = Counter()
     milestone_counter: Counter[str] = Counter()
     milestone_failed_counter: Counter[str] = Counter()
     skipped_files: list[tuple[Path, str]] = []
@@ -1294,7 +1325,8 @@ def run_batch_stats() -> None:
     console.print(Panel(
         f"目录: [bold yellow]{BATCH_DIR}[/bold yellow]\n"
         f"JSON 文件数: {len(files)}\n"
-        "HTTP正确率 = 排除 status_code 为 NOT_HTTP_VULN 的记录后计算",
+        "HTTP正确率 = 排除 status_code 为「非HTTP漏洞/协议未支持」的记录后计算\n"
+        "状态码/失败归因/成功层级均按中文码归一后统计",
         title="批量测试记录统计",
         border_style="cyan",
     ))
@@ -1317,10 +1349,50 @@ def run_batch_stats() -> None:
         accuracy = passed / completed if completed else 0
         http_accuracy = http_passed / http if http else 0
         for item in results:
-            status_counter[str(item.get("status_code") or "UNKNOWN")] += 1
+            status_code = normalize_status_code(str(item.get("status_code") or "")) or "未知"
+            status_counter[status_code] += 1
+            # 历史 batch JSON 常缺 failure_class / success_tier：按状态码与 passed 回填
+            failure_raw = str(item.get("failure_class") or "").strip()
+            if failure_raw:
+                failure_class = normalize_failure_class(failure_raw)
+            elif item.get("passed") and status_code in {
+                CAPTURE_SUCCESS,
+                TARGET_ORACLE_SUCCESS,
+                DB_ORACLE_SUCCESS,
+            }:
+                failure_class = normalize_failure_class("无")
+            else:
+                failure_class = normalize_failure_class(status_code)
+            failure_class_counter[failure_class or "未知"] += 1
+            tier_raw = str(item.get("success_tier") or "").strip()
+            if tier_raw:
+                tier = normalize_success_tier(tier_raw)
+            elif item.get("passed") and status_code in {
+                CAPTURE_SUCCESS,
+                TARGET_ORACLE_SUCCESS,
+                DB_ORACLE_SUCCESS,
+            }:
+                # 历史通过记录无层级字段时，至少记为「目标证据」
+                from cve_hunter.evidence import SUCCESS_TIER_L2
+
+                tier = SUCCESS_TIER_L2
+            elif item.get("passed"):
+                from cve_hunter.evidence import SUCCESS_TIER_L1
+
+                tier = SUCCESS_TIER_L1
+            else:
+                tier = normalize_success_tier("")
+            success_tier_counter[tier or "无"] += 1
             source_counter[str(item.get("poc_source") or "无")] += 1
             success_level = str(item.get("success_level") or "none")
             success_level_counter[success_level] += 1
+            # 粗分协议：数据库命中/DB 状态 vs 非HTTP vs HTTP
+            if status_code in {DB_ORACLE_SUCCESS, "数据库执行失败", "数据库验证失败"} or "database" in success_level.lower():
+                protocol_counter["database"] += 1
+            elif is_non_http_result(item):
+                protocol_counter["协议未支持/非HTTP"] += 1
+            else:
+                protocol_counter["http"] += 1
             milestones = item.get("milestones") or {}
             if isinstance(milestones, dict):
                 for name, value in milestones.items():
@@ -1379,7 +1451,10 @@ def run_batch_stats() -> None:
         f"排除非HTTP正确率 {total_http_accuracy_text}"
     )
 
-    _print_counter_table("状态码分布", status_counter, "状态码")
+    _print_counter_table("状态码分布（中文）", status_counter, "状态码")
+    _print_counter_table("失败归因分布（中文）", failure_class_counter, "失败归因")
+    _print_counter_table("成功层级分布（中文）", success_tier_counter, "成功层级")
+    _print_counter_table("协议分布", protocol_counter, "协议")
     _print_counter_table("PoC 来源分布", source_counter, "来源")
     _print_counter_table("Success Level 分布", success_level_counter, "success_level")
     _print_counter_table("Milestone 失败分布", milestone_failed_counter, "milestone")

@@ -145,6 +145,32 @@ def classify_failure(status_code: str) -> str:
     return _LEGACY_FAILURE.get(str(status_code or "").strip(), FAILURE_CLASS_UNKNOWN)
 
 
+def normalize_failure_class(value: str) -> str:
+    """把历史英文失败归因或状态码规范为中文归因。"""
+    text = str(value or "").strip()
+    if not text:
+        return FAILURE_CLASS_UNKNOWN
+    if text in _LEGACY_FAILURE:
+        return _LEGACY_FAILURE[text]
+    # 已是中文归因
+    if text in {
+        FAILURE_CLASS_NONE,
+        FAILURE_CLASS_INPUT,
+        FAILURE_CLASS_INTEL,
+        FAILURE_CLASS_ENVIRONMENT,
+        FAILURE_CLASS_PRECONDITION,
+        FAILURE_CLASS_CANDIDATE,
+        FAILURE_CLASS_EXECUTION,
+        FAILURE_CLASS_EVIDENCE,
+        FAILURE_CLASS_POLICY,
+        FAILURE_CLASS_INFRA,
+        FAILURE_CLASS_UNKNOWN,
+    }:
+        return text
+    # 把状态码也映射到归因
+    return classify_failure(text)
+
+
 def normalize_success_tier(tier: str) -> str:
     text = str(tier or "").strip()
     return _LEGACY_TIER.get(text, text or SUCCESS_TIER_NONE)
@@ -201,6 +227,135 @@ def derive_success_tier(
     return base
 
 
+def build_version_evidence(
+    *,
+    cve_id: str = "",
+    nvd_description: str = "",
+    attack_environment: dict[str, Any] | None = None,
+    execution_spec: dict[str, Any] | None = None,
+    executor_result: dict[str, Any] | None = None,
+    oracle_result: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """从 NVD 描述、compose 镜像标签与执行结果拼装 claimed/verified 版本线索。
+
+    不是完整 vulnerable/fixed 对照，而是可归档的轻量证据链：
+    - claimed: 情报/文档宣称的受影响版本与镜像
+    - verified: 实际环境/查询观察到的版本线索
+    """
+    import re
+
+    env = attack_environment or {}
+    spec = execution_spec or {}
+    executor = executor_result or {}
+    oracle = oracle_result or {}
+
+    claimed_versions: list[str] = []
+    # NVD 常见 "9.3 through 11.2" / "5.5.x before 5.5.24"
+    for match in re.finditer(
+        r"(\d+(?:\.\d+){0,3})\s*(?:through|to|–|-|—)\s*(\d+(?:\.\d+){0,3})",
+        nvd_description or "",
+        re.I,
+    ):
+        claimed_versions.append(f"{match.group(1)}-{match.group(2)}")
+    for match in re.finditer(
+        r"(?:before|prior to|<)\s*(\d+(?:\.\d+){1,3})",
+        nvd_description or "",
+        re.I,
+    ):
+        claimed_versions.append(f"<{match.group(1)}")
+
+    compose_file = str(env.get("compose_file") or "")
+    image_tags: list[str] = []
+    if compose_file:
+        try:
+            text = Path(compose_file).read_text(encoding="utf-8", errors="ignore")
+            image_tags = re.findall(r"image:\s*([^\s#]+)", text, re.I)
+        except OSError:
+            # 端口重映射后可能指向临时 yml，回退 workdir
+            workdir = str(env.get("workdir") or "")
+            for name in ("docker-compose.yml", "docker-compose.yaml", "compose.yml"):
+                candidate = Path(workdir) / name if workdir else Path()
+                if candidate.is_file():
+                    try:
+                        text = candidate.read_text(encoding="utf-8", errors="ignore")
+                        image_tags = re.findall(r"image:\s*([^\s#]+)", text, re.I)
+                        break
+                    except OSError:
+                        pass
+
+    verified_versions: list[str] = []
+    # 执行日志 / body 中的 version() 结果
+    blobs = [
+        str(executor.get("body") or ""),
+        str((oracle.get("target_oracle") or {}).get("evidence") or ""),
+        json.dumps(executor.get("logs") or [], ensure_ascii=False),
+    ]
+    for blob in blobs:
+        for match in re.finditer(
+            r"(PostgreSQL|MySQL|MariaDB)\s+(\d+\.\d+(?:\.\d+)?)",
+            blob,
+            re.I,
+        ):
+            verified_versions.append(f"{match.group(1)} {match.group(2)}")
+        for match in re.finditer(r"\b(\d+\.\d+\.\d+)\b", blob):
+            # 镜像标签式版本，弱证据
+            if match.group(1) not in " ".join(verified_versions):
+                pass
+    for tag in image_tags:
+        if ":" in tag:
+            verified_versions.append(f"image:{tag}")
+
+    # 去重保序
+    def _uniq(items: list[str]) -> list[str]:
+        seen: set[str] = set()
+        out: list[str] = []
+        for item in items:
+            key = item.strip().lower()
+            if not key or key in seen:
+                continue
+            seen.add(key)
+            out.append(item.strip())
+        return out
+
+    claimed_versions = _uniq(claimed_versions)
+    verified_versions = _uniq(verified_versions)
+    image_tags = _uniq(image_tags)
+
+    return {
+        "cve_id": cve_id,
+        "claimed": {
+            "source": "nvd_description",
+            "version_ranges": claimed_versions,
+            "notes": "从 NVD 描述启发式抽取的受影响版本区间，非官方 CPE 解析",
+        },
+        "environment": {
+            "compose_file": compose_file,
+            "image_tags": image_tags,
+            "target_url": str(env.get("target_url") or env.get("target_host") or ""),
+            "engine": str(spec.get("engine") or executor.get("engine") or ""),
+        },
+        "verified": {
+            "source": "runtime_or_image",
+            "observations": verified_versions,
+            "oracle_type": str((oracle.get("target_oracle") or executor.get("oracle") or {}).get("type") or ""),
+            "notes": "来自镜像标签与/或执行输出中的版本字符串；不等于完整 fixed 对照",
+        },
+        "comparison": {
+            "has_claimed": bool(claimed_versions),
+            "has_verified": bool(verified_versions),
+            "status": (
+                "claimed_and_verified"
+                if claimed_versions and verified_versions
+                else "claimed_only"
+                if claimed_versions
+                else "verified_only"
+                if verified_versions
+                else "empty"
+            ),
+        },
+    }
+
+
 def write_repro_bundle(
     output_dir: Path,
     *,
@@ -223,6 +378,7 @@ def write_repro_bundle(
     milestones: dict[str, Any] | None = None,
     attempt_history: list[dict[str, Any]] | None = None,
     execution_spec: dict[str, Any] | None = None,
+    version_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """写入 output/<CVE>/repro/ 可重放包。"""
     repro_dir = Path(output_dir) / "repro"
@@ -274,6 +430,20 @@ def write_repro_bundle(
             slim["body"] = body[:4000] + "\n...<truncated>..."
         path.write_text(json.dumps(slim, ensure_ascii=False, indent=2), encoding="utf-8")
         artifacts["executor"] = str(path)
+
+    version_payload = version_evidence
+    if version_payload is None:
+        version_payload = build_version_evidence(
+            cve_id=cve_id,
+            attack_environment=attack_environment,
+            execution_spec=execution_spec,
+            executor_result=executor_result,
+            oracle_result=oracle_result,
+        )
+    if version_payload:
+        path = evidence_dir / "version_evidence.json"
+        path.write_text(json.dumps(version_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        artifacts["version_evidence"] = str(path)
 
     if pcap_file_path:
         src = Path(pcap_file_path)

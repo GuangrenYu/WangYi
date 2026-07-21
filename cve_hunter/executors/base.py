@@ -61,6 +61,9 @@ def build_execution_spec(
     trigger_sql: list[str] | None = None,
     cleanup_sql: list[str] | None = None,
     oracle: dict[str, Any] | None = None,
+    action: str = "",
+    auth_bypass: dict[str, Any] | None = None,
+    sessions: list[dict[str, Any]] | None = None,
     raw_http: str = "",
     nuclei_yaml: str = "",
     notes: str = "",
@@ -86,6 +89,12 @@ def build_execution_spec(
                 "oracle": oracle or {"type": "error_pattern", "expect": ""},
             }
         )
+        if action:
+            spec["action"] = str(action).strip().lower()
+        if auth_bypass:
+            spec["auth_bypass"] = dict(auth_bypass)
+        if sessions:
+            spec["sessions"] = [dict(item) for item in sessions if isinstance(item, dict)]
     elif proto == PROTOCOL_HTTP:
         spec.update({"raw_http": raw_http, "nuclei_yaml": nuclei_yaml})
     else:

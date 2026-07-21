@@ -15,6 +15,7 @@ build/
 archives/
 !archives/
 !archives/README.md
+tools/bin/nuclei.exe
 data/cve/pcaps/
 docs/references/zotero_import/
 third_party/vulhub/
