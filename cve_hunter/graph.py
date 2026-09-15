@@ -44,7 +44,7 @@ from cve_hunter.prompts.templates import (
     POC_GENERATION_FROM_SEARCH,
 )
 from cve_hunter.tools.nvd import query_nvd
-from cve_hunter.tools.web_extract import extract_url_content
+from cve_hunter.tools.web_extract import extract_url_content, extract_url_content_tavily
 from cve_hunter.tools.poc_sources import search_nuclei, search_exploitdb, search_imfht
 from cve_hunter.tools.local_kb import search_local_kb, save_to_local_kb
 from cve_hunter.tools.web_search import search_web
@@ -563,6 +563,9 @@ LOCAL DATA:\n{state.nvd_description}\n{state.local_knowledge_context}\n{json.dum
             fallback_phase="generate_report",
         ))
     else:
+        if state.allow_reference_links and state.nvd_references:
+            updates["current_phase"] = "reference_analysis"
+            return updates
         updates.update({"current_phase": "generate_report", **make_status_update(
             state.status_code, POC_NOT_FOUND,
             "本地知识库无可用 PoC；NVD 描述、CVSS 和版本信息不足以构造明确请求，未联网补全",
@@ -626,8 +629,9 @@ def node_reference_analysis(state: CVEState) -> dict:
     urls = list(state.nvd_references[:8])
     for i, url in enumerate(urls):
         console.print(f"  [{i+1}] {url[:80]}...")
+    extractor = extract_url_content_tavily if state.allow_reference_links else extract_url_content
     with ThreadPoolExecutor(max_workers=min(4, len(urls))) as pool:
-        results = list(pool.map(extract_url_content, urls))
+        results = list(pool.map(extractor, urls))
     for url, result in zip(urls, results):
         if result.get("content"):
             contents.append({"url": url, "title": result.get("title", ""), "content": result["content"][:3000]})
@@ -1902,8 +1906,10 @@ def _has_local_kb_candidates(state: CVEState) -> bool:
 
 def _next_phase_after_verify(state: CVEState) -> str:
     """验证失败后确定下一个阶段。"""
-    if state.local_only:
+    if state.local_only and not state.allow_reference_links:
         return "generate_report"
+    if state.local_only and state.allow_reference_links:
+        return "reference_analysis"
     # local-container：已有本地候选则不再远程发散；无本地候选时仅允许本地 nuclei
     if _local_container_skip_remote(state):
         if _has_local_kb_candidates(state):

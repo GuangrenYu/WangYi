@@ -117,7 +117,8 @@ class TaskManager:
     def create(self, cves: list[str], *, mode: str, concurrency: int, docker_enabled: bool,
                uploaded_files: list[str] | None = None, output_dir: str = "",
                selection: dict[str, Any] | None = None, task_id: str | None = None,
-               target_ip: str = "", local_only: bool = False, environment_discovery: bool = False) -> dict[str, Any]:
+               target_ip: str = "", local_only: bool = False, environment_discovery: bool = False,
+               allow_reference_links: bool = False) -> dict[str, Any]:
         task_id = task_id or uuid.uuid4().hex[:12]
         items = {
             cve: {"cve_id": cve, "status": "queued", "phase": "queued", "phases_tried": [], "message": "排队中"}
@@ -132,6 +133,7 @@ class TaskManager:
             "selection": dict(selection or {}),
             "target_ip": target_ip or _live_target_ip(), "local_only": local_only,
             "environment_discovery": environment_discovery and not local_only,
+            "allow_reference_links": allow_reference_links,
         }
         with self.lock:
             self.tasks[task_id] = task
@@ -285,6 +287,7 @@ class TaskManager:
                     "docker_enabled": docker_enabled, "uploaded_files": uploaded_files,
                     "output_dir": output_dir, "target_ip": task["target_ip"],
                     "local_only": task["local_only"], "environment_discovery": task["environment_discovery"],
+                    "allow_reference_links": task.get("allow_reference_links", False),
                 })
             except Exception as exc:
                 with self.lock:
@@ -487,6 +490,7 @@ async def create_task(
     docker_enabled: bool = Form(False),
     target_ip: str = Form(""),
     local_only: bool = Form(False),
+    allow_reference_links: bool = Form(False),
     environment_discovery: bool = Form(False),
     output_dir: str = Form(""),
     range_mode: str = Form("all"),
@@ -575,6 +579,7 @@ async def create_task(
     }
     task = manager.create(cves, mode=mode, concurrency=concurrency, docker_enabled=docker_enabled,
                           target_ip=target_ip, local_only=local_only, environment_discovery=environment_discovery,
+                          allow_reference_links=allow_reference_links,
                           uploaded_files=[str(path) for path in upload_root.rglob("*") if path.is_file()],
                           output_dir=str(actual_output), selection=selection, task_id=task_id)
     task["upload_dir"] = str(upload_root)

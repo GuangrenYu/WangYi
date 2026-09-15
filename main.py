@@ -133,6 +133,7 @@ def run_cve(
     output_dir: str = "",
     target_ip: str = "",
     local_only: bool = False,
+    allow_reference_links: bool = False,
     environment_discovery: bool = False,
 ) -> CVEState:
     """执行一次 CVE 复现流程。"""
@@ -163,6 +164,7 @@ def run_cve(
         output_dir=str(output_dir or ""),
         target_ip=str(target_ip or ""),
         local_only=bool(local_only),
+        allow_reference_links=bool(allow_reference_links),
         environment_discovery=bool(environment_discovery),
     )
 

@@ -22,6 +22,7 @@ class CVEState:
     output_dir: str = ""
     target_ip: str = ""
     local_only: bool = False
+    allow_reference_links: bool = False
     environment_discovery: bool = False
 
     # ── NVD 信息 ──
