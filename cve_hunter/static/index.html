@@ -105,7 +105,12 @@
         </div>
         <div class="knowledge-action nvd-action">
           <label for="nvd-years">下载 NVD 年份</label>
-          <input id="nvd-years" class="text-input" type="text" value="2024,2025,2026" placeholder="例如 2024,2025,2026">
+          <input id="nvd-years" class="text-input" type="text" value="1999-2026" placeholder="1999-2026、2021,2024 或 all">
+          <div class="inline-form">
+            <button id="nvd-years-all" class="secondary" type="button">全部年份（1999–至今）</button>
+            <button id="nvd-years-recent" class="secondary" type="button">最近三年</button>
+          </div>
+          <small class="field-hint">支持年份区间或逗号分隔列表。选择后点击下方下载按钮。</small>
           <label class="check-field"><input id="nvd-modified" type="checkbox" checked><span>同时更新 modified / recent</span></label>
           <label class="check-field"><input id="nvd-force" type="checkbox"><span>强制重新下载</span></label>
           <button id="nvd-update" class="primary" type="button">下载或更新 NVD</button>
@@ -114,6 +119,6 @@
       </div>
     </section>
   </main>
-  <script src="/static/app.js?v=6949306"></script>
+  <script src="/static/app.js?v=nvd-years-1999"></script>
 </body>
 </html>

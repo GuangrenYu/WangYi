@@ -146,6 +146,8 @@ async function pollNvdJob(jobId){
 $('#knowledge-refresh').addEventListener('click',()=>loadKnowledge());
 $('#knowledge-search-button').addEventListener('click',()=>loadKnowledge($('#knowledge-search').value.trim()));
 $('#knowledge-search').addEventListener('keydown',event=>{if(event.key==='Enter')loadKnowledge(event.target.value.trim())});
+$('#nvd-years-all').addEventListener('click',()=>{$('#nvd-years').value='all'});
+$('#nvd-years-recent').addEventListener('click',()=>{const year=new Date().getFullYear();$('#nvd-years').value=`${year-2}-${year}`});
 $('#nvd-update').addEventListener('click',async()=>{
   const button=$('#nvd-update'),status=$('#nvd-job-status'); button.disabled=true; status.textContent='正在创建下载任务…';
   const form=new FormData(); form.append('years',$('#nvd-years').value.trim()); form.append('include_modified',$('#nvd-modified').checked?'true':'false'); form.append('force',$('#nvd-force').checked?'true':'false');

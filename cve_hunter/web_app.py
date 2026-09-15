@@ -419,20 +419,14 @@ async def update_nvd(
     include_modified: bool = Form(True),
     force: bool = Form(False),
 ) -> JSONResponse:
-    from datetime import datetime
+    from cve_hunter.tools.nvd_local import parse_nvd_years
 
-    current_year = datetime.now().year
-    if years.strip():
-        try:
-            selected_years = sorted({int(value.strip()) for value in years.split(",") if value.strip()})
-        except ValueError:
-            raise HTTPException(400, "年份必须是逗号分隔的数字")
-    else:
-        selected_years = list(range(max(2002, current_year - 2), current_year + 1))
-    if not selected_years or any(year < 2002 or year > current_year for year in selected_years):
-        raise HTTPException(400, f"年份范围必须是 2002-{current_year}")
+    try:
+        selected_years = parse_nvd_years(years)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
     with knowledge_lock:
-        if any(job.get("status") == "running" for job in knowledge_jobs.values()):
+        if any(job.get("status") in {"queued", "running"} for job in knowledge_jobs.values()):
             raise HTTPException(409, "已有 NVD 更新任务正在运行")
         job_id = uuid.uuid4().hex[:12]
         knowledge_jobs[job_id] = {

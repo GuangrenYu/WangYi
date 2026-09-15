@@ -34,7 +34,7 @@ _MODIFIED_FILE = "nvdcve-2.0-modified.json.gz"
 _RECENT_FILE = "nvdcve-2.0-recent.json.gz"
 
 # 有效年份范围
-_YEAR_MIN = 2002
+_YEAR_MIN = 1999
 _YEAR_MAX = datetime.now().year
 
 # 已加载的年度数据缓存（最多缓存 2 个年份）
@@ -43,6 +43,31 @@ _cache_order: list[str] = []
 _cve_index_cache: dict[str, dict[str, dict]] = {}
 _feed_signatures: dict[str, tuple[int, int]] = {}
 _MAX_CACHE_SIZE = 2
+
+
+def parse_nvd_years(value: str, *, current_year: int | None = None) -> list[int]:
+    """Accept comma/space lists, inclusive ranges, or all."""
+    upper = current_year if current_year is not None else datetime.now().year
+    value = value.strip().lower()
+    if value in {"all", "全部"}:
+        return list(range(_YEAR_MIN, upper + 1))
+    if not value:
+        return list(range(max(_YEAR_MIN, upper - 2), upper + 1))
+    selected = set()
+    for token in re.split(r"[,，\s]+", value):
+        if not token:
+            continue
+        match = re.fullmatch(r"(\d{4})(?:[-–至](\d{4}))?", token)
+        if not match:
+            raise ValueError("年份格式错误：请输入 1999-2026、逗号分隔年份或 all")
+        start = int(match[1])
+        end = int(match[2] or match[1])
+        if not _YEAR_MIN <= start <= end <= upper:
+            raise ValueError(f"年份范围必须是 {_YEAR_MIN}-{upper}，起始年份不能大于结束年份")
+        selected.update(range(start, end + 1))
+    if not selected:
+        raise ValueError("请选择至少一个年份")
+    return sorted(selected)
 
 
 def _nvd_local_dir() -> Path:
@@ -87,7 +112,7 @@ def download_nvd_feeds(
     """下载 NVD 年度数据包到本地。
 
     Args:
-        years: 要下载的年份列表，默认所有年份 (2002-至今)
+        years: 要下载的年份列表，默认所有年份 (1999-至今)
         include_modified: 是否一并下载 modified/recent 包
         force: 是否强制重新下载（忽略本地已有文件）
         progress_callback: 进度回调 callable(year, status, msg)
