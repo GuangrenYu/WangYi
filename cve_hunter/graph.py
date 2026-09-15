@@ -1461,13 +1461,15 @@ def node_generate_report(state: CVEState) -> dict:
         "ips_match_details": state.ips_match_details,
         "cve_ips_match_details": state.cve_ips_match_details,
         "generic_ips_match_details": state.generic_ips_match_details,
-        "pcap_file_path": state.pcap_file_path,
+        "pcap_file_path": repro_bundle.get("artifacts", {}).get("pcap", state.pcap_file_path),
         "timestamp": datetime.now().isoformat(),
     }
     with open(output_dir / "result.json", "w", encoding="utf-8") as f:
         json.dump(report_data, f, ensure_ascii=False, indent=2)
 
     console.print(f"  [green]✓[/] 报告与产物已保存到 {output_dir}")
+    for error in repro_bundle.get("errors", []):
+        console.print(f"  归档错误: {error}", markup=False)
     if repro_bundle.get("path"):
         console.print(
             f"  [green]✓[/] repro bundle: {repro_bundle['path']} "
@@ -1475,6 +1477,7 @@ def node_generate_report(state: CVEState) -> dict:
         )
     return {
         "analysis_report": report,
+        "pcap_file_path": repro_bundle.get("artifacts", {}).get("pcap", state.pcap_file_path),
         "status": final_status,
         "status_code": final_code,
         "message": final_msg,

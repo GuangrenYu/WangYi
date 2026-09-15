@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import json
+import shutil
+import httpx
 from pathlib import Path
 from typing import Any
 
@@ -379,12 +381,7 @@ def write_repro_bundle(
     request_steps: list[dict[str, Any]] | None = None,
     version_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """归档请求所需的最小产物。
-
-    ``result.json`` 是状态和执行结果的唯一汇总文件，由工作流最终节点写入。
-    这里仅保留发包生成的 PCAP，并在多步骤/结构化执行确有需要时写入
-    ``request.json``；PoC、executor/oracle 和复现说明不再各自落盘。
-    """
+    """在本次 CVE 目录保存 PoC 和 PCAP；状态仍统一写入 result.json。"""
     output_root = Path(output_dir)
     output_root.mkdir(parents=True, exist_ok=True)
 
@@ -395,8 +392,13 @@ def write_repro_bundle(
         _LEGACY_FAILURE.get(failure_class, failure_class)
     )
 
-    # Raw HTTP and single request PoCs already live in result.json. A separate
-    # request file is useful only when replay needs ordering or protocol fields.
+    for name, content, kind in (("poc.http", poc_raw_http, "poc_http"),
+                                ("poc.yaml", poc_nuclei_yaml, "poc_yaml")):
+        if content:
+            path = output_root / name
+            path.write_text(content, encoding="utf-8")
+            artifacts[kind] = str(path)
+
     if request_steps or execution_spec:
         request_path = output_root / "request.json"
         request_payload: dict[str, Any] = {}
@@ -407,14 +409,40 @@ def write_repro_bundle(
         request_path.write_text(json.dumps(request_payload, ensure_ascii=False, indent=2), encoding="utf-8")
         artifacts["request"] = str(request_path)
 
-    if pcap_file_path:
-        src = Path(pcap_file_path)
-        if src.is_file():
-            # Keep the canonical capture in PCAP_OUTPUT_DIR. Copying it into
-            # repro would create a second source of truth.
-            artifacts["pcap"] = str(src)
-        else:
-            errors.append(f"pcap 不存在: {pcap_file_path}")
+    download_url = str((executor_result or {}).get("pcap_download_url") or "")
+    if pcap_file_path or download_url:
+        destination = output_root / "capture.pcap"
+        pending = output_root / "capture.pcap.part"
+        try:
+            src = Path(pcap_file_path) if pcap_file_path else None
+            # A remote service's relative path belongs to that service, not
+            # this machine. Prefer its explicit download URL when present.
+            if download_url:
+                with httpx.stream("GET", download_url, timeout=httpx.Timeout(90, connect=15),
+                                  follow_redirects=True, trust_env=False) as response:
+                    response.raise_for_status()
+                    with pending.open("wb") as handle:
+                        for chunk in response.iter_bytes():
+                            handle.write(chunk)
+                with pending.open("rb") as handle:
+                    header = handle.read(24)
+                if len(header) < 24 or header[:4] not in {
+                    b"\xd4\xc3\xb2\xa1", b"\xa1\xb2\xc3\xd4",
+                    b"\x4d\x3c\xb2\xa1", b"\xa1\xb2\x3c\x4d", b"\x0a\x0d\x0d\x0a",
+                }:
+                    raise ValueError("下载内容不是有效的 PCAP/PCAPNG 文件头")
+                pending.replace(destination)
+            elif src and src.is_file():
+                if src.resolve() != destination.resolve():
+                    shutil.copy2(src, pending)
+                    pending.replace(destination)
+            else:
+                raise FileNotFoundError(f"pcap 不存在: {pcap_file_path}")
+            artifacts["pcap"] = str(destination)
+        except (OSError, ValueError, httpx.HTTPError) as exc:
+            errors.append(f"PCAP 归档失败: {exc}")
+        finally:
+            pending.unlink(missing_ok=True)
 
     complete = bool(
         tier in {SUCCESS_TIER_L2, SUCCESS_TIER_L3, SUCCESS_TIER_L4}

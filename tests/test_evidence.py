@@ -111,9 +111,9 @@ class EvidenceHelperTests(unittest.TestCase):
             self.assertTrue(result["complete"])
             self.assertEqual(result["success_tier"], "目标证据")
             self.assertEqual(result["failure_class"], "无")
-            self.assertTrue((root / "repro" / "manifest.json").is_file())
-            manifest = json.loads((root / "repro" / "manifest.json").read_text(encoding="utf-8"))
-            self.assertEqual(manifest["status_code"], "目标命中")
+            self.assertEqual((root / "capture.pcap").read_bytes(), pcap.read_bytes())
+            self.assertIn("GET / HTTP/1.1", (root / "poc.http").read_text())
+            self.assertEqual(result["artifacts"]["pcap"], str(root / "capture.pcap"))
 
 
 if __name__ == "__main__":
