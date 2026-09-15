@@ -394,6 +394,7 @@ def _run_nvd_update(job_id: str, years: list[int], include_modified: bool, force
             job = knowledge_jobs.get(job_id)
             if job:
                 job["current"] = {"label": label, "status": status, "message": message}
+                job.setdefault("year_status", {})[label] = {"status": status, "message": message}
                 job["updated_at"] = _now()
 
     with knowledge_lock:

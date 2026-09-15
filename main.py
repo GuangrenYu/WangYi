@@ -1630,8 +1630,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--start", type=int, help="批量测试起始序号，1-based，包含")
     parser.add_argument("--end", type=int, help="批量测试结束序号，1-based，包含")
     parser.add_argument("--terminals", "-t", type=int, help="批量测试/二次核验时自动拆分启动的终端数")
-    parser.add_argument("--update-nvd", action="store_true", help="下载/更新本地 NVD 数据 Feed（2002-至今）")
-    parser.add_argument("--update-nvd-years", help="指定要下载的年份，逗号分隔，如 2024,2025")
+    parser.add_argument("--update-nvd", action="store_true", help="下载/更新本地 NVD 数据 Feed（1999-至今）")
+    parser.add_argument("--update-nvd-years", help="指定年份列表或区间，如 1999-2026 或 all")
     parser.add_argument("--update-nvd-force", action="store_true", help="强制重新下载 NVD 数据（忽略本地已有文件）")
     parser.add_argument("--retry-shard", type=int, help=argparse.SUPPRESS)
     parser.add_argument("--retry-shards", type=int, help=argparse.SUPPRESS)
@@ -1735,7 +1735,11 @@ def main():
     if args.update_nvd:
         nvd_years = None
         if args.update_nvd_years:
-            nvd_years = [int(y.strip()) for y in args.update_nvd_years.split(",") if y.strip().isdigit()]
+            from cve_hunter.tools.nvd_local import parse_nvd_years
+            try:
+                nvd_years = parse_nvd_years(args.update_nvd_years)
+            except ValueError as exc:
+                raise SystemExit(str(exc))
         run_update_nvd(years=nvd_years, force=args.update_nvd_force)
         return
 

@@ -128,7 +128,9 @@ async function pollNvdJob(jobId){
       const response=await fetch(`/api/knowledge-bases/nvd/jobs/${jobId}`); const job=await response.json();
       if(!response.ok) throw new Error(job.detail||'任务读取失败');
       const current=job.current?` · ${job.current.label}: ${job.current.status}`:'';
-      status.textContent=`${job.status}${current}`;
+      const history=Object.entries(job.year_status||{}).map(([year,entry])=>`${year}: ${entry.status}${entry.status==='error'?` (${entry.message})`:''}`).join('\n');
+      status.style.whiteSpace='pre-wrap';
+      status.textContent=`计划年份：${(job.years||[]).join(', ')}\n${job.status}${current}\n${history}`;
       if(job.status==='completed'||job.status==='failed'){
         clearInterval(timer); $('#nvd-update').disabled=false; loadKnowledge();
         if(job.status==='failed') status.textContent=`下载失败：${job.error||'未知错误'}`;
@@ -138,6 +140,7 @@ async function pollNvdJob(jobId){
           status.textContent=errors.length
             ? `${summary}，失败 ${errors.length}：${errors[0].label||''} ${errors[0].error||'未知错误'}`
             : summary;
+          status.textContent+=`\n${history}`;
         }
       }
     }catch(error){clearInterval(timer);$('#nvd-update').disabled=false;status.textContent=`状态读取失败：${error.message}`;}
