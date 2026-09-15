@@ -42,10 +42,18 @@ def extract_url_content(url: str) -> dict[str, str]:
 def extract_url_content_tavily(url: str) -> dict[str, str]:
     """Fetch one NVD reference through Tavily's extract endpoint."""
     try:
-        from tavily import TavilyClient
         if not cfg.tavily_api_key:
             return {"url": url, "title": "", "content": "", "error": "TAVILY_API_KEY 未配置"}
-        result = TavilyClient(api_key=cfg.tavily_api_key).extract(urls=[url])
+        resp = httpx.post(
+            "https://api.tavily.com/extract",
+            headers={"Authorization": f"Bearer {cfg.tavily_api_key}", "Content-Type": "application/json"},
+            json={"urls": [url], "include_images": False},
+            timeout=httpx.Timeout(90.0, connect=15.0),
+            proxy=cfg.httpx_proxy or None,
+            trust_env=False,
+        )
+        resp.raise_for_status()
+        result = resp.json()
         item = (result.get("results") or [{}])[0]
         return {"url": url, "title": item.get("title", ""), "content": item.get("raw_content", "") or item.get("content", "")}
     except Exception as exc:
