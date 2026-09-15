@@ -468,6 +468,9 @@ async def create_task(
     if not files:
         raise HTTPException(400, "请上传至少一个文件")
     target_ip = target_ip.strip() or cfg.target_ip
+    if target_ip.startswith(("http://", "https://")):
+        from urllib.parse import urlparse
+        target_ip = urlparse(target_ip).hostname or target_ip
     try:
         ipaddress.ip_address(target_ip)
     except ValueError:

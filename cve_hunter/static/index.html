@@ -25,9 +25,11 @@
       <form id="task-form" class="control-panel">
         <div class="section-title"><span>新建任务</span><span class="step">01</span></div>
         <label class="dropzone" id="dropzone">
-          <input id="file-input" type="file" multiple webkitdirectory directory>
+          <input id="file-input" type="file" multiple accept=".txt,.md,.yaml,.yml,.json,.py,.c,.sh,.pcap">
+          <input id="folder-input" type="file" multiple webkitdirectory directory hidden>
           <span class="drop-icon">+</span>
           <strong>拖入文件夹或文件</strong>
+          <button id="folder-button" type="button" class="secondary">选择文件夹</button>
           <small>支持 cve.txt、PoC、Markdown、YAML</small>
           <span id="file-list" class="file-list">尚未选择文件</span>
         </label>

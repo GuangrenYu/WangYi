@@ -43,7 +43,9 @@ function render(){
 }
 async function loadTasks(){try{const res=await fetch('/api/tasks'); const tasks=await res.json(); tasks.forEach(t=>state.tasks.set(t.id,t)); render(); tasks.filter(t=>active(t.status)).forEach(connect)}catch(e){$('#health-text').textContent='服务不可用'; $('#health-dot').style.background='#b94a4a'}}
 function connect(task){if(state.sources.has(task.id))return; const source=new EventSource(`/api/tasks/${task.id}/events`); state.sources.set(task.id,source); source.onmessage=e=>{const event=JSON.parse(e.data); if(event.task)state.tasks.set(task.id,event.task); if(event.event==='item'){const t=state.tasks.get(task.id); if(t&&t.items[event.cve_id])Object.assign(t.items[event.cve_id],event)} if(event.event==='progress'){const t=state.tasks.get(task.id); if(t)t.completed=event.completed} if(event.event==='status'){const t=state.tasks.get(task.id); if(t)t.status=event.status} render(); if(!active(state.tasks.get(task.id)?.status)){source.close();state.sources.delete(task.id)}}; source.onerror=()=>{source.close();state.sources.delete(task.id)} }
-$('#file-input').addEventListener('change',e=>{selectedFiles=[...e.target.files];renderFiles(selectedFiles)});
+$('#file-input').addEventListener('change',e=>{selectedFiles=[...e.target.files];renderFiles(selectedFiles);e.target.value=''});
+$('#folder-button').addEventListener('click',()=>$('#folder-input').click());
+$('#folder-input').addEventListener('change',e=>{selectedFiles=[...e.target.files];renderFiles(selectedFiles);e.target.value=''});
 ['dragenter','dragover'].forEach(name=>$('#dropzone').addEventListener(name,e=>{e.preventDefault();$('#dropzone').classList.add('drag')}));
 ['dragleave','drop'].forEach(name=>$('#dropzone').addEventListener(name,e=>{e.preventDefault();$('#dropzone').classList.remove('drag')}));
 $('#dropzone').addEventListener('drop',e=>{selectedFiles=[...e.dataTransfer.files];renderFiles(selectedFiles)});
