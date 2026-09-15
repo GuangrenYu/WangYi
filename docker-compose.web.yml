@@ -1,0 +1,19 @@
+services:
+  cve-hunter-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # Web Docker execution is opt-in per task in the UI.
+      AUTO_ENV_ENABLED: "false"
+    volumes:
+      - .:/app
+      - cve_hunter_output:/app/output
+    command: ["uvicorn", "cve_hunter.web_app:app", "--host", "0.0.0.0", "--port", "8000"]
+
+volumes:
+  cve_hunter_output:

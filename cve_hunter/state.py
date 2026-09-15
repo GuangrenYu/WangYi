@@ -13,6 +13,13 @@ class CVEState:
     # ── 输入 ──
     cve_id: str = ""
     local_container_mode: bool = False
+    # Web/API execution controls. ``None`` keeps the process configuration.
+    docker_enabled: bool | None = None
+    stop_after: str = ""
+    selected_phases: list[str] = field(default_factory=list)
+    uploaded_files: list[str] = field(default_factory=list)
+    # Per-run artifact root. Empty keeps the configured CLI output directory.
+    output_dir: str = ""
 
     # ── NVD 信息 ──
     nvd_description: str = ""

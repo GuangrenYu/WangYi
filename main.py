@@ -125,6 +125,12 @@ def run_cve(
     show_details: bool = True,
     generate_report: bool = True,
     local_container_mode: bool = False,
+    on_progress=None,
+    selected_phases: list[str] | None = None,
+    stop_after: str = "",
+    docker_enabled: bool | None = None,
+    uploaded_files: list[str] | None = None,
+    output_dir: str = "",
 ) -> CVEState:
     """执行一次 CVE 复现流程。"""
     from cve_hunter.agents import reclaim_owned_compose_projects
@@ -146,11 +152,38 @@ def run_cve(
         cve_id=cve_id,
         generate_report=generate_report,
         local_container_mode=local_container_mode,
+        docker_enabled=docker_enabled,
+        stop_after=stop_after,
+        selected_phases=list(selected_phases or []),
+        uploaded_files=list(uploaded_files or []),
+        output_dir=str(output_dir or ""),
     )
 
     final_state = None
     try:
-        final_state = graph.invoke(initial_state)
+        if on_progress:
+            on_progress({"event": "started", "cve_id": cve_id, "phase": "validate_input", "message": "任务已开始"})
+        if selected_phases:
+            initial_state.selected_phases = list(selected_phases)
+        # stream_mode=updates exposes each LangGraph node boundary so the web UI
+        # can show real progress without changing the existing workflow nodes.
+        streamed_state = dict(initial_state.__dict__)
+        for update in graph.stream(initial_state, stream_mode="updates"):
+            node_name = next(iter(update), "")
+            node_update = update.get(node_name) or {}
+            if isinstance(node_update, dict):
+                streamed_state = {**streamed_state, **node_update}
+                phase = str(node_update.get("current_phase") or node_name)
+                if on_progress:
+                    on_progress({
+                        "event": "phase",
+                        "cve_id": cve_id,
+                        "phase": phase,
+                        "node": node_name,
+                        "message": f"完成 {node_name}",
+                        "phases_tried": list(node_update.get("phases_tried") or []),
+                    })
+        final_state = streamed_state
     finally:
         # Safety net for residual containers when report teardown was skipped
         # or intermediate cleanup failed after compose up.

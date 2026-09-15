@@ -275,3 +275,43 @@ RUN_MODE=local_lab
 | Bing/Tavily 联网搜索 | `web_search` |
 | 自动发包抓包 | `verify_poc` |
 | 归档 PoC/PCAP/结果 | `generate_report` |
+# 浏览器工作台
+
+项目提供一个可选的浏览器界面，用于拖入 CVE 清单或 PoC 文件夹、选择执行模块、并发线程和是否启用 Docker，并实时查看每个 CVE 的 LangGraph 阶段。
+
+```powershell
+# 本机启动（默认不启动 Docker 靶场）
+.\run_web.ps1
+# 然后访问 http://127.0.0.1:8000
+
+# 使用可迁移的 Compose 环境启动 Web 服务；Docker 靶场仍需在任务中单独勾选
+.\run_web.ps1 -Docker
+```
+
+模式说明：`完整流程` 会执行分析、PoC、验证和归档；`仅分析`、`仅生成 PoC`、`仅环境` 会在对应阶段生成报告并停止。单次任务的 Docker 开关默认关闭，不会覆盖 `.env` 的全局配置。
+
+部署到另一台机器时执行 `git clone <仓库地址>`，复制 `.env.example` 为 `.env` 并填入 API 配置，然后运行上述命令即可。上传文件和任务快照保存在 `output/web_uploads` 与 `output/web_tasks`，运行结果仍归档到现有 `output` 目录。
+
+## Ubuntu 精简部署
+
+精简包不包含 Docker 文件、测试数据、历史报告和缓存，只保留浏览器工作台与运行所需代码：
+
+```bash
+bash scripts/build_ubuntu_minimal.sh
+```
+
+在 Ubuntu 上解压后执行一键部署：
+
+```bash
+CVH_APP_DIR=$HOME/cve-hunter bash deploy_ubuntu.sh
+```
+
+如果代码已上传到 Git，可直接使用：
+
+```bash
+git clone <你的仓库地址> "$HOME/cve-hunter" && cd "$HOME/cve-hunter" && bash deploy_ubuntu.sh
+```
+
+Web 工作台支持选择输出目录、执行输入文件的全部/前 N 条/后 N 条/第 M 到第 K 条，并在服务重启后保留最近任务记录。
+
+知识库维护页提供本地 PoC、NVD Feed、PCAP 状态统计和 CVE 文件名搜索。NVD 更新默认下载最近三年并包含 `modified/recent`，也可以在页面中填写指定年份；下载在后台执行，不会阻塞任务工作台。

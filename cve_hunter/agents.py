@@ -119,7 +119,8 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
         _select_environment_candidate(environment, candidates[0])
         summary = f"发现攻击环境候选: {environment.get('source', 'unknown')}"
 
-    if (cfg.auto_env_enabled or local_container_mode) and candidates:
+    env_enabled = cfg.auto_env_enabled if state.docker_enabled is None else bool(state.docker_enabled)
+    if (env_enabled or local_container_mode) and candidates:
         selected, run_result = _start_environment_candidates(candidates)
         if selected:
             _select_environment_candidate(environment, selected)
@@ -141,7 +142,7 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
                 fallback_url = _default_target_url()
                 environment["target_url"] = fallback_url
                 environment["target_host"] = _target_host_from_url(fallback_url)
-    elif (cfg.auto_env_enabled or local_container_mode) and not candidates:
+    elif (env_enabled or local_container_mode) and not candidates:
         status = "not_found"
         detail = f"所有已接入环境源均未匹配到 {state.cve_id}，已跳过"
         if bootstrap_errors:
@@ -151,7 +152,7 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
         if local_container_mode:
             environment["target_url"] = ""
             environment["target_host"] = ""
-    elif not cfg.auto_env_enabled:
+    elif not env_enabled:
         environment["setup_mode"] = "disabled"
 
     llm_plan = {}
@@ -479,8 +480,12 @@ def _merge_llm_critic_review(
         enriched["attack_objective"] = str(llm_review["attack_objective"])
         merged_review["attack_objective"] = enriched["attack_objective"]
     if isinstance(llm_review.get("validation_hint"), dict) and llm_review["validation_hint"].get("type"):
-        enriched["validation_hint"] = llm_review["validation_hint"]
-        merged_review["validation_hint"] = enriched["validation_hint"]
+        # Preserve explicitly-provided hints from trusted sources (custom KB);
+        # only auto-inferred or generic IPS hints should be overridden by the LLM.
+        existing_type = str(enriched.get("validation_hint", {}).get("type") or "").strip().lower()
+        if existing_type in {"", "ips", "none"}:
+            enriched["validation_hint"] = llm_review["validation_hint"]
+            merged_review["validation_hint"] = enriched["validation_hint"]
     if llm_review.get("preconditions") is not None:
         preconditions = _string_list(llm_review.get("preconditions"))
         if preconditions:
@@ -1382,7 +1387,9 @@ def _teardown_compose_environment(environment: dict[str, Any]) -> dict[str, Any]
         }
 
     image_cleanup: dict[str, Any] = {"skipped": True, "removed": [], "kept": [], "errors": []}
-    if getattr(cfg, "environment_remove_images_after_run", True):
+    if getattr(cfg, "environment_remove_images_after_run", True) and (
+        images_before or _compose_has_build_services(compose_path)
+    ):
         image_cleanup = remove_compose_images(
             images_before,
             preserve_db=bool(getattr(cfg, "environment_preserve_db_images", True)),
@@ -1411,6 +1418,18 @@ def _compose_image_refs(compose_path: Path) -> list[str]:
         if isinstance(service, dict) and service.get("image"):
             images.append(str(service["image"]).strip())
     return images
+
+
+def _compose_has_build_services(compose_path: Path) -> bool:
+    """Return whether a compose file builds any project-local image."""
+    try:
+        data = yaml.safe_load(compose_path.read_text(encoding="utf-8", errors="ignore")) or {}
+    except Exception:
+        return False
+    services = data.get("services") if isinstance(data, dict) else None
+    if not isinstance(services, dict):
+        return False
+    return any(isinstance(service, dict) and service.get("build") for service in services.values())
 
 
 _DB_IMAGE_MARKERS = (
@@ -1484,10 +1503,13 @@ def remove_compose_images(
                 else:
                     errors.append(tag)
 
-    # dangling layers
-    _run_environment_command(
-        ["docker", "image", "prune", "-f"], cwd=Path("."), timeout=120
-    )
+    # Avoid an unrelated global prune when the compose file had no image
+    # references and no project-local tags. Besides being unnecessary, that
+    # command can obscure the compose cleanup result for callers and tests.
+    if images or removed or kept:
+        _run_environment_command(
+            ["docker", "image", "prune", "-f"], cwd=Path("."), timeout=120
+        )
 
     return {
         "skipped": False,

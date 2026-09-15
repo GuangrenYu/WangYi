@@ -39,6 +39,7 @@ _YEAR_MAX = datetime.now().year
 # 已加载的年度数据缓存（最多缓存 2 个年份）
 _year_cache: dict[str, dict] = {}
 _cache_order: list[str] = []
+_cve_index_cache: dict[str, dict[str, dict]] = {}
 _MAX_CACHE_SIZE = 2
 
 
@@ -119,7 +120,11 @@ def download_nvd_feeds(
             try:
                 resp = client.get(url)
                 resp.raise_for_status()
-                filepath.write_bytes(resp.content)
+                # Write atomically so an interrupted download cannot corrupt a
+                # previously usable feed.
+                temp_path = filepath.with_name(f".{filepath.name}.part")
+                temp_path.write_bytes(resp.content)
+                temp_path.replace(filepath)
                 result["downloaded"].append(label)
                 if progress_callback:
                     progress_callback(label, "done", f"{len(resp.content) / 1024 / 1024:.1f} MB")
@@ -131,6 +136,7 @@ def download_nvd_feeds(
     # 清除缓存，下次查询重新加载
     _year_cache.clear()
     _cache_order.clear()
+    _cve_index_cache.clear()
 
     return result
 
@@ -199,6 +205,7 @@ def _load_feed(filepath: Path) -> dict:
         old = _cache_order.pop(0)
         if old in _year_cache:
             del _year_cache[old]
+        _cve_index_cache.pop(old, None)
 
     data = _read_gz_json(filepath)
     _year_cache[key] = data
@@ -214,16 +221,21 @@ def _read_gz_json(filepath: Path) -> dict:
 def _search_in_feed(cve_id: str, filepath: Path) -> dict | None:
     """在单个 feed 文件中搜索 CVE。"""
     try:
-        data = _load_feed(filepath)
+        key = str(filepath)
+        index = _cve_index_cache.get(key)
+        if index is None:
+            data = _load_feed(filepath)
+            # Annual feeds contain tens of thousands of entries; indexing once
+            # avoids rescanning the full JSON for every CVE in a batch.
+            index = {
+                str(item.get("cve", {}).get("id", "")).upper(): item.get("cve", {})
+                for item in data.get("vulnerabilities", [])
+                if item.get("cve", {}).get("id")
+            }
+            _cve_index_cache[key] = index
+        return index.get(cve_id.upper())
     except Exception:
         return None
-
-    cve_id_upper = cve_id.upper()
-    for vuln in data.get("vulnerabilities", []):
-        cve = vuln.get("cve", {})
-        if cve.get("id", "").upper() == cve_id_upper:
-            return cve
-    return None
 
 
 def _parse_cve_item(cve_id: str, cve_item: dict) -> dict:

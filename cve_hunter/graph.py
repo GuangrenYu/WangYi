@@ -21,6 +21,7 @@ import re
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
+from functools import lru_cache
 
 from langgraph.graph import StateGraph, END
 
@@ -82,6 +83,14 @@ from cve_hunter.executors.base import (
 from rich.console import Console
 
 console = Console()
+
+
+def _state_output_root(state: CVEState) -> Path:
+    """Resolve a run-specific artifact root without changing CLI defaults."""
+    configured = str(getattr(state, "output_dir", "") or "").strip()
+    root = Path(configured) if configured else Path(cfg.output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _mark_milestone_map(
@@ -242,9 +251,6 @@ def node_vuln_type_check(state: CVEState) -> dict:
             "current_phase": "reference_analysis" if result.is_http_vuln or protocol == PROTOCOL_DATABASE else "generate_report",
             "error_messages": state.error_messages + [result.error],
         }
-        if "AI 判断" in result.error:
-            hint = classify_error(result.error, source="llm")
-            updates.update(make_status_update(state.status_code, hint.code, hint.message))
         if not result.is_http_vuln and protocol != PROTOCOL_DATABASE:
             updates.update(make_status_update(state.status_code, PROTOCOL_UNSUPPORTED, status_description(PROTOCOL_UNSUPPORTED)))
         console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type} protocol={protocol}")
@@ -293,7 +299,7 @@ def node_environment_agent(state: CVEState) -> dict:
     manifest_path = ""
     manifest_error = ""
     try:
-        manifest_path = str(write_environment_manifest(environment_spec, Path(cfg.output_dir) / state.cve_id))
+        manifest_path = str(write_environment_manifest(environment_spec, _state_output_root(state) / state.cve_id))
     except Exception as exc:
         manifest_error = f"环境 manifest 写入失败: {exc}"
 
@@ -367,7 +373,9 @@ def node_local_kb_search(state: CVEState) -> dict:
     """在本地知识库中搜索 PoC（最高优先级，优先于远程源）。"""
     console.print("[bold cyan]▶ 搜索本地知识库[/]")
     try:
-        result = search_local_kb(state.cve_id)
+        result = _search_uploaded_files(state.cve_id, state.uploaded_files)
+        if not result.get("found"):
+            result = search_local_kb(state.cve_id)
         if result.get("found"):
             source_label = result["source"]
             console.print(f"  [green]✓ 本地知识库命中[/] (来源: {source_label})")
@@ -386,6 +394,7 @@ def node_local_kb_search(state: CVEState) -> dict:
                         evidence_url=result.get("kb_path", ""),
                         confidence=0.95 if source_label == "local_kb_custom" else 0.75,
                         reason="本地知识库命中",
+                        validation_hint=result.get("validation_hint"),
                     ),
                     fallback_phase="reference_analysis",
                 ))
@@ -501,6 +510,48 @@ def node_local_kb_search(state: CVEState) -> dict:
     }
 
 
+def _search_uploaded_files(cve_id: str, paths: list[str]) -> dict:
+    """Use PoC files supplied by the browser before the shared KB.
+
+    Uploads remain outside the repository KB. Raw HTTP and Nuclei YAML are
+    recognized directly; scripts/prose are still retained on disk for review.
+    """
+    needle = str(cve_id or "").upper()
+    for raw_path in paths or []:
+        path = Path(str(raw_path))
+        if not path.is_file():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore")
+        except OSError:
+            continue
+        haystack = f"{path.name}\n{text}".upper()
+        if needle and needle not in haystack:
+            continue
+        requests = extract_http_requests(text)
+        if requests:
+            return {
+                "found": True,
+                "source": "uploaded_file",
+                "raw_http": requests[0],
+                "kb_path": str(path),
+                "validation_hint": {"type": "status_code"},
+            }
+        suffix = path.suffix.lower()
+        if suffix in {".yaml", ".yml"} and ("http:" in text.lower() or "id:" in text.lower()):
+            return {"found": True, "source": "uploaded_file", "yaml_content": text, "kb_path": str(path)}
+        candidates = parse_poc_candidates_json(text)
+        if candidates:
+            return {
+                "found": True,
+                "source": "uploaded_file",
+                "raw_http": candidates[0].get("raw_http", ""),
+                "kb_path": str(path),
+                "validation_hint": {"type": "status_code"},
+            }
+    return {"found": False}
+
+
 def node_reference_analysis(state: CVEState) -> dict:
     """提取 NVD References 中的网页内容并分析。"""
     console.print(f"[bold cyan]▶ 分析 References[/] ({len(state.nvd_references)} 个链接)")
@@ -509,9 +560,15 @@ def node_reference_analysis(state: CVEState) -> dict:
 
     contents = []
     errors = []
-    for i, url in enumerate(state.nvd_references[:8]):
+    # References are independent network requests.  A small bounded pool cuts
+    # wall time substantially while avoiding an unbounded burst to external sites.
+    from concurrent.futures import ThreadPoolExecutor
+    urls = list(state.nvd_references[:8])
+    for i, url in enumerate(urls):
         console.print(f"  [{i+1}] {url[:80]}...")
-        result = extract_url_content(url)
+    with ThreadPoolExecutor(max_workers=min(4, len(urls))) as pool:
+        results = list(pool.map(extract_url_content, urls))
+    for url, result in zip(urls, results):
         if result.get("content"):
             contents.append({"url": url, "title": result.get("title", ""), "content": result["content"][:3000]})
         elif result.get("error"):
@@ -642,8 +699,14 @@ def node_exploitdb_search(state: CVEState) -> dict:
             # 提取 exploit 内容
             extract_errors = []
             candidates = []
-            for rec in records[:2]:
-                content = extract_url_content(rec["url"])
+            from concurrent.futures import ThreadPoolExecutor
+            records_to_fetch = records[:2]
+            if records_to_fetch:
+                with ThreadPoolExecutor(max_workers=min(2, len(records_to_fetch))) as pool:
+                    fetched = list(pool.map(lambda rec: extract_url_content(rec["url"]), records_to_fetch))
+            else:
+                fetched = []
+            for rec, content in zip(records_to_fetch, fetched):
                 if content.get("content"):
                     pocs = _extract_http_requests(content["content"], state.cve_id)
                     if pocs:
@@ -746,14 +809,32 @@ def node_web_search(state: CVEState) -> dict:
         f"{state.cve_id} vulnerability exploit payload",
     ]
 
+    from concurrent.futures import ThreadPoolExecutor
     all_results = []
     search_errors = []
-    for q in queries:
-        results = search_web(q, max_results=5)
+    with ThreadPoolExecutor(max_workers=len(queries)) as pool:
+        query_results = list(pool.map(lambda q: search_web(q, max_results=5), queries))
+    for results in query_results:
         for item in results:
             if item.get("title") == "搜索错误":
                 search_errors.append(item.get("content", "搜索错误"))
         all_results.extend(results)
+
+    # Both queries commonly return the same URLs; remove duplicates before
+    # fetching page bodies and sending context to the LLM.
+    deduped_results = []
+    seen_urls = set()
+    for item in all_results:
+        if item.get("title") == "搜索错误":
+            deduped_results.append(item)
+            continue
+        url = str(item.get("url") or "").strip()
+        key = url or (item.get("title"), item.get("content", ""))
+        if key in seen_urls:
+            continue
+        seen_urls.add(key)
+        deduped_results.append(item)
+    all_results = deduped_results
 
     if not all_results:
         console.print("  [yellow]⚠ 搜索无结果[/]")
@@ -778,13 +859,18 @@ def node_web_search(state: CVEState) -> dict:
     # 提取高价值页面内容
     search_text = ""
     extract_errors = []
+    extract_targets = [r for r in all_results[:5] if r.get("title") != "搜索错误" and not r.get("content") and r.get("url")]
+    extracted = {}
+    if extract_targets:
+        with ThreadPoolExecutor(max_workers=min(4, len(extract_targets))) as pool:
+            extracted = {id(item): result for item, result in zip(extract_targets, pool.map(lambda item: extract_url_content(item["url"]), extract_targets))}
     for r in all_results[:5]:
         if r.get("title") == "搜索错误":
             continue
         if r.get("content"):
             search_text += f"\n### {r['title']} ({r['url']})\n{r['content'][:2000]}\n"
         elif r.get("url"):
-            page = extract_url_content(r["url"])
+            page = extracted.get(id(r), {})
             if page.get("content"):
                 search_text += f"\n### {page['title']} ({r['url']})\n{page['content'][:2000]}\n"
             elif page.get("error"):
@@ -1171,7 +1257,7 @@ def node_generate_report(state: CVEState) -> dict:
     if environment_spec:
         environment_spec["teardown_result"] = teardown_result
         try:
-            write_environment_manifest(environment_spec, Path(cfg.output_dir) / state.cve_id)
+            write_environment_manifest(environment_spec, _state_output_root(state) / state.cve_id)
         except Exception as exc:
             teardown_result = {
                 **teardown_result,
@@ -1237,7 +1323,7 @@ def node_generate_report(state: CVEState) -> dict:
         report = ""
 
     # 归档所有产物
-    output_dir = Path(cfg.output_dir) / state.cve_id
+    output_dir = _state_output_root(state) / state.cve_id
     output_dir.mkdir(parents=True, exist_ok=True)
 
     if report:
@@ -1391,6 +1477,7 @@ def _raw_http_candidates(
     evidence_url: str = "",
     confidence: float = 0.5,
     reason: str = "",
+    validation_hint: dict | None = None,
 ) -> list[dict]:
     """把提取到的 Raw HTTP PoC 标准化为候选记录。"""
     candidates = []
@@ -1398,6 +1485,7 @@ def _raw_http_candidates(
         raw_http = poc.strip()
         if not raw_http:
             continue
+        hint = validation_hint if isinstance(validation_hint, dict) and validation_hint else _infer_raw_http_validation_hint(raw_http)
         candidates.append({
             "kind": "raw_http",
             "source": source,
@@ -1406,7 +1494,7 @@ def _raw_http_candidates(
             "evidence_url": evidence_url,
             "confidence": confidence,
             "reason": reason,
-            "validation_hint": _infer_raw_http_validation_hint(raw_http),
+            "validation_hint": hint,
         })
     return candidates
 
@@ -1844,6 +1932,8 @@ def route_after_validate(state: CVEState) -> str:
 
 
 def route_after_type_check(state: CVEState) -> str:
+    if getattr(state, "stop_after", "") == "analysis":
+        return "generate_report"
     # HTTP 与数据库可继续；其余非 HTTP 仅保留接口，直接归档。
     if state.is_http_vuln or getattr(state, "protocol", "") == PROTOCOL_DATABASE:
         return "environment_agent"
@@ -1853,6 +1943,8 @@ def route_after_type_check(state: CVEState) -> str:
 def route_after_environment(state: CVEState) -> str:
     """Respect local-mode environment failures instead of continuing PoC discovery."""
     if state.current_phase == "generate_report":
+        return "generate_report"
+    if getattr(state, "stop_after", "") == "environment":
         return "generate_report"
     return "local_kb_search"
 
@@ -1880,6 +1972,10 @@ def route_after_local_kb(state: CVEState) -> str:
 def route_after_phase(state: CVEState) -> str:
     """通用路由：根据 current_phase 决定下一个节点。"""
     phase = state.current_phase
+    # PoC-only runs stop as soon as the discovery chain produced a candidate;
+    # if a source had no candidate, the normal fallback search continues.
+    if getattr(state, "stop_after", "") == "poc" and phase == "verify_poc":
+        return "generate_report"
     phase_map = {
         "nvd_query": "query_nvd",
         "vuln_type_check": "vuln_type_check",
@@ -1906,6 +2002,7 @@ def route_after_phase(state: CVEState) -> str:
 # ═══════════════════════════════════════════════════════════
 
 
+@lru_cache(maxsize=1)
 def build_graph() -> StateGraph:
     """构建并编译 LangGraph 工作流。"""
 

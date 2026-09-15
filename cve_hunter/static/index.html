@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>CVE Hunter Workbench</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">C</span><span>CVE Hunter</span><small>WORKBENCH</small></div>
+    <div class="health"><i id="health-dot"></i><span id="health-text">连接中</span></div>
+  </header>
+  <main class="shell">
+    <section class="intro">
+      <div>
+        <p class="eyebrow">安全验证工作台</p>
+        <h1>把 CVE 与 PoC 流程变成可观察任务</h1>
+        <p class="subline">上传清单或 PoC 文件夹，选择执行范围，实时查看每个 CVE 的阶段和产物。</p>
+      </div>
+      <div class="stat-strip"><span><b id="task-count">0</b><small>任务</small></span><span><b id="running-count">0</b><small>运行中</small></span></div>
+    </section>
+
+    <section class="workspace">
+      <form id="task-form" class="control-panel">
+        <div class="section-title"><span>新建任务</span><span class="step">01</span></div>
+        <label class="dropzone" id="dropzone">
+          <input id="file-input" type="file" multiple webkitdirectory directory>
+          <span class="drop-icon">+</span>
+          <strong>拖入文件夹或文件</strong>
+          <small>支持 cve.txt、PoC、Markdown、YAML</small>
+          <span id="file-list" class="file-list">尚未选择文件</span>
+        </label>
+
+        <div class="field-group">
+          <label>执行模块</label>
+          <div class="mode-grid">
+            <label class="mode-card active"><input type="radio" name="mode" value="full" checked><b>完整流程</b><small>分析 · 生成 · 验证 · 归档</small></label>
+            <label class="mode-card"><input type="radio" name="mode" value="analysis"><b>仅分析</b><small>获取情报与漏洞分类</small></label>
+            <label class="mode-card"><input type="radio" name="mode" value="poc"><b>仅生成 PoC</b><small>停止在候选生成</small></label>
+            <label class="mode-card"><input type="radio" name="mode" value="environment"><b>仅环境</b><small>规划或启动靶场</small></label>
+          </div>
+        </div>
+
+        <div class="settings-row">
+          <label class="number-field">并发线程<input id="concurrency" type="number" min="1" max="16" value="2"></label>
+          <label class="switch-field"><input id="docker-enabled" type="checkbox"><span class="switch"></span><span>启用 Docker 环境</span></label>
+        </div>
+        <div class="field-group run-options">
+          <label for="output-dir">输出目录</label>
+          <input id="output-dir" class="text-input" type="text" value="output/web_runs" placeholder="例如 output/web_runs 或 /data/cve-results">
+          <small class="field-hint">每次任务会在此目录下建立独立任务目录。</small>
+        </div>
+        <div class="field-group run-options">
+          <label for="range-mode">输入范围</label>
+          <select id="range-mode" class="text-input">
+            <option value="all">全部 CVE</option>
+            <option value="head">前 N 条</option>
+            <option value="tail">后 N 条</option>
+            <option value="slice">第 M 到第 K 条（含首尾）</option>
+          </select>
+          <div id="range-count-row" class="range-row"><input id="range-count" type="range" min="1" max="100" value="10"><output id="range-count-value">10</output></div>
+          <div id="range-slice-row" class="slice-row" hidden><input id="range-start" class="text-input" type="number" min="1" value="1" placeholder="M"><span>到</span><input id="range-end" class="text-input" type="number" min="1" value="10" placeholder="K"></div>
+          <small id="range-hint" class="field-hint">上传后按文件中的 CVE 顺序执行。</small>
+        </div>
+        <button class="primary" type="submit"><span>▶</span> 创建并运行任务</button>
+        <p class="hint">Docker 默认关闭。开启后仅对本次任务生效。</p>
+      </form>
+
+      <section class="monitor-panel">
+        <div class="section-title"><span>任务监控</span><span class="step">02</span></div>
+        <div id="empty-state" class="empty-state"><div class="empty-mark">◎</div><strong>等待任务</strong><span>新建任务后，每个 CVE 的进度会显示在这里</span></div>
+        <div id="task-list" class="task-list"></div>
+        <div class="history-title"><span>最近运行</span><small>保留最近 5 次任务记录</small></div>
+        <div id="history-list" class="history-list"></div>
+      </section>
+    </section>
+
+    <section id="knowledge-panel" class="knowledge-panel">
+      <div class="section-title"><span>知识库维护</span><span class="step">03</span></div>
+      <div class="knowledge-toolbar">
+        <div>
+          <strong>本地数据状态</strong>
+          <p class="field-hint">查看 PoC、NVD Feed 和 PCAP 证据库；下载操作在后台执行。</p>
+        </div>
+        <button id="knowledge-refresh" class="secondary" type="button">刷新状态</button>
+      </div>
+      <div id="knowledge-cards" class="knowledge-cards"><div class="knowledge-loading">正在读取知识库状态…</div></div>
+      <div class="knowledge-actions">
+        <div class="knowledge-action">
+          <label for="knowledge-search">搜索本地 PoC 文件</label>
+          <div class="inline-form"><input id="knowledge-search" class="text-input" type="search" placeholder="例如 CVE-2021-44228"><button id="knowledge-search-button" class="secondary" type="button">搜索</button></div>
+          <div id="knowledge-results" class="knowledge-results"></div>
+        </div>
+        <div class="knowledge-action nvd-action">
+          <label for="nvd-years">下载 NVD 年份</label>
+          <input id="nvd-years" class="text-input" type="text" value="2024,2025,2026" placeholder="例如 2024,2025,2026">
+          <label class="check-field"><input id="nvd-modified" type="checkbox" checked><span>同时更新 modified / recent</span></label>
+          <label class="check-field"><input id="nvd-force" type="checkbox"><span>强制重新下载</span></label>
+          <button id="nvd-update" class="primary" type="button">下载或更新 NVD</button>
+          <div id="nvd-job-status" class="field-hint"></div>
+        </div>
+      </div>
+    </section>
+  </main>
+  <script src="/static/app.js"></script>
+</body>
+</html>
