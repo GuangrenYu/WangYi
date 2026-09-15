@@ -646,6 +646,8 @@ def node_reference_analysis(state: CVEState) -> dict:
     }
     if errors:
         updates["error_messages"] = state.error_messages + errors[:3]
+        for error in errors[:3]:
+            console.print(f"  参考提取失败: {error}", markup=False)
         if not contents:
             hint = classify_error(errors[0], source="reference")
             updates.update(make_status_update(state.status_code, hint.code, hint.message))

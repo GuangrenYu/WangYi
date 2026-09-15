@@ -207,6 +207,10 @@ def classify_error(error: object, *, source: str = "", error_type: str = "") -> 
     source_key = source.strip().lower()
     error_text = _error_text(error, error_type)
     lower = error_text.lower()
+    # An API rejection while extracting a reference is not a broken website.
+    if "tavily api http " in lower or "for url 'https://api.tavily.com/" in lower:
+        source_key = "tavily"
+        source = "Tavily API"
 
     if _contains_any(lower, (
         "insufficient_quota",
@@ -232,7 +236,7 @@ def classify_error(error: object, *, source: str = "", error_type: str = "") -> 
     api_like_source = source_key in {"llm", "tavily", "api", "nvd"}
     if _contains_any(lower, ("invalid api key", "invalid_api_key", "无效 api")) or (
         api_like_source
-        and _contains_any(lower, ("401", "unauthorized", "authentication", "auth failed", "permission denied", "forbidden"))
+        and _contains_any(lower, ("401", "432", "433", "unauthorized", "authentication", "auth failed", "permission denied", "forbidden"))
     ):
         return StatusHint(API_AUTH_FAILED, f"{source or 'API'} 鉴权失败: {error_text}")
 

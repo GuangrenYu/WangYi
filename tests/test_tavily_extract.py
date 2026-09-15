@@ -35,3 +35,23 @@ def test_auth_and_quota_errors_are_not_retried(status):
     with patch("httpx.post", return_value=response) as post, pytest.raises(httpx.HTTPStatusError):
         post_tavily("search", api_key="key", payload={}, proxy="http://127.0.0.1:7890")
     assert post.call_count == 1
+
+
+def test_tavily_432_preserves_plan_limit_detail_and_redacts_key(monkeypatch):
+    from cve_hunter.status_codes import classify_error, API_QUOTA_EXHAUSTED
+    response = httpx.Response(432, request=httpx.Request("POST", "https://api.tavily.com/extract"),
+        json={"detail": {"error": "This request exceeds your plan's set usage limit. tvly-secret"}})
+    monkeypatch.setattr(web_extract, "cfg", SimpleNamespace(tavily_api_key="tvly-secret", httpx_proxy=None))
+    with patch("httpx.post", return_value=response) as post:
+        result = web_extract.extract_url_content_tavily("https://example.test/advisory")
+    assert "Tavily API HTTP 432" in result["error"]
+    assert "set usage limit" in result["error"]
+    assert "tvly-secret" not in result["error"]
+    assert classify_error(result["error"], source="reference").code == API_QUOTA_EXHAUSTED
+    assert post.call_count == 1
+
+
+def test_tavily_non_json_error_is_preserved():
+    response = httpx.Response(503, request=httpx.Request("POST", "https://api.tavily.com/extract"), text="Service unavailable")
+    with patch("httpx.post", return_value=response), pytest.raises(httpx.HTTPStatusError, match="Service unavailable"):
+        post_tavily("extract", api_key="secret", payload={})

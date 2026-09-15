@@ -21,6 +21,15 @@ from cve_hunter.status_codes import (
 
 
 class StatusCodeClassificationTests(unittest.TestCase):
+    def test_tavily_reference_api_error_is_not_broken_link(self):
+        for error, expected in [
+            ("Tavily API HTTP 401 (extract): Unauthorized", API_AUTH_FAILED),
+            ("Tavily API HTTP 432 (extract): Forbidden", API_AUTH_FAILED),
+            ("Tavily API HTTP 503 (extract): unavailable", API_REQUEST_FAILED),
+            ("Client error '432 ' for url 'https://api.tavily.com/extract'", API_AUTH_FAILED),
+        ]:
+            self.assertEqual(classify_error(error, source="reference").code, expected)
+
     def test_codes_are_chinese(self):
         self.assertEqual(CAPTURE_SUCCESS, "检测命中")
         self.assertEqual(status_description(CAPTURE_SUCCESS), "IPS 精确命中当前 CVE")
