@@ -43,6 +43,20 @@ def test_pre_2002_feeds_are_reported_as_officially_unavailable():
         client.assert_called_once()
 
 
+def test_gzip_feed_with_legacy_cve_items_is_read_even_without_gz_suffix(tmp_path):
+    import gzip, json
+    from dataclasses import replace
+    from cve_hunter.tools.nvd import query_nvd
+    item = {"cve": {"id": "CVE-2002-0001", "descriptions": [{"lang": "en", "value": "legacy"}]}}
+    path = tmp_path / "archive-2002.feed"
+    with gzip.open(path, "wb") as stream:
+        stream.write(json.dumps({"CVE_Items": [item]}).encode())
+    from cve_hunter.tools import nvd_local
+    with patch.object(nvd_local, "cfg", replace(nvd_local.cfg, nvd_local_dir=str(tmp_path), cvelist_dir=str(tmp_path / "none"))):
+        result = query_nvd("CVE-2002-0001", local_only=True)
+    assert result["description"] == "legacy"
+
+
 def test_nvd_request_falls_back_to_direct_when_proxy_is_unreachable():
     request = httpx.Request("GET", "https://services.nvd.nist.gov/")
     response = httpx.Response(200, request=request, json={"vulnerabilities": []})

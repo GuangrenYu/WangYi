@@ -253,9 +253,13 @@ def query_nvd_local(cve_id: str) -> dict | None:
     local_dir = _nvd_local_dir()
 
     # 1) 先查对应年份文件
-    files = [local_dir / f"nvdcve-2.0-{label}{suffix}"
+    files = [local_dir / f"nvdcve-{version}-{label}{suffix}"
+             for version in ("2.0", "1.1")
              for label in ("modified", "recent", str(year))
-             for suffix in (".json.gz", ".json")]
+             for suffix in (".json.gz", ".json", ".gz")]
+    # Accept renamed or nested feeds as long as their filename identifies the year.
+    files += [p for p in local_dir.rglob("*") if p.is_file() and str(year) in p.name and p.suffix in {".gz", ".json"}]
+    files = list(dict.fromkeys(files))
     files = [path for path in files if path.is_file()]
     if not files:
         raise FileNotFoundError(
@@ -341,7 +345,9 @@ def _load_feed(filepath: Path) -> dict:
 
 
 def _read_gz_json(filepath: Path) -> dict:
-    opener = gzip.open if filepath.suffix == ".gz" else open
+    with filepath.open("rb") as raw:
+        magic = raw.read(2)
+    opener = gzip.open if magic == b"\x1f\x8b" else open
     with opener(filepath, "rb") as f:
         return json.loads(f.read())
 
@@ -363,11 +369,15 @@ def _search_in_feed(cve_id: str, filepath: Path) -> dict | None:
             data = _load_feed(filepath)
             # Annual feeds contain tens of thousands of entries; indexing once
             # avoids rescanning the full JSON for every CVE in a batch.
-            if not isinstance(data, dict) or not isinstance(data.get("vulnerabilities"), list):
-                raise ValueError("不是 NVD JSON 2.0 格式（缺少 vulnerabilities 数组），请重新下载 2.0 Feed")
+            if isinstance(data, dict) and isinstance(data.get("vulnerabilities"), list):
+                entries = data["vulnerabilities"]
+            elif isinstance(data, dict) and isinstance(data.get("CVE_Items"), list):
+                entries = data["CVE_Items"]
+            else:
+                raise ValueError("不是 NVD JSON 格式（缺少 vulnerabilities/CVE_Items 数组）")
             index = {
                 str(item.get("cve", {}).get("id", "")).upper(): item.get("cve", {})
-                for item in data.get("vulnerabilities", [])
+                for item in entries
                 if item.get("cve", {}).get("id")
             }
             _cve_index_cache[key] = index
