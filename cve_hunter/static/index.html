@@ -33,6 +33,11 @@
           <small>支持 cve.txt、PoC、Markdown、YAML</small>
           <span id="file-list" class="file-list">尚未选择文件</span>
         </label>
+        <div class="field-group">
+          <label for="cve-input">CVE 文本输入（可续用上次）</label>
+          <textarea id="cve-input" class="text-input" rows="3" placeholder="每行一个 CVE；也可从历史选择"></textarea>
+          <div class="inline-form"><select id="input-history" class="text-input"><option value="">选择上次输入</option></select><button id="history-load" type="button" class="secondary">载入</button></div>
+        </div>
 
         <div class="field-group">
           <label>执行模块</label>

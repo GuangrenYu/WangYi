@@ -377,6 +377,7 @@ def _knowledge_snapshot(query: str = "") -> dict[str, Any]:
         "poc": _directory_stats(poc_root, max_files=3000),
         "custom_poc": _directory_stats(custom_root),
         "nvd": get_nvd_local_status(),
+        "cvelist": _directory_stats(ROOT / Path(str(getattr(cfg, "cvelist_dir", "third_party/cvelistV5/cves")).replace("\\", "/")), pattern="*.json", max_files=200000),
         "pcap": pcap,
         "search": {"query": query, "matches": matches},
     }
@@ -385,6 +386,15 @@ def _knowledge_snapshot(query: str = "") -> dict[str, Any]:
 @app.get("/api/knowledge-bases")
 async def knowledge_bases(query: str = "") -> dict[str, Any]:
     return {"status": "ok", "snapshot": _knowledge_snapshot(query)}
+
+
+@app.get("/api/input-history")
+async def input_history() -> dict[str, Any]:
+    with manager.lock:
+        values = []
+        for task in manager.tasks.values():
+            values.extend(task.get("items", {}).keys())
+        return {"cves": list(dict.fromkeys(values))[-500:]}
 
 
 def _run_nvd_update(job_id: str, years: list[int], include_modified: bool, force: bool) -> None:
@@ -450,7 +460,8 @@ async def nvd_job(job_id: str) -> dict[str, Any]:
 
 @app.post("/api/tasks")
 async def create_task(
-    files: list[UploadFile] = File(...),
+    files: list[UploadFile] | None = File(None),
+    cve_text: str = Form(""),
     mode: str = Form("full"),
     concurrency: int = Form(2),
     docker_enabled: bool = Form(False),
@@ -466,8 +477,7 @@ async def create_task(
     mode = mode.strip().lower()
     if mode not in {"full", "analysis", "environment", "poc"}:
         raise HTTPException(400, "mode 必须是 full、analysis、environment 或 poc")
-    if not files:
-        raise HTTPException(400, "请上传至少一个文件")
+    files = files or []
     target_ip = target_ip.strip() or cfg.target_ip
     if target_ip.startswith(("http://", "https://")):
         from urllib.parse import urlparse
@@ -503,6 +513,11 @@ async def create_task(
             if cve not in seen:
                 seen.add(cve)
                 cves.append(cve)
+    for match in CVE_PATTERN.findall(cve_text):
+        cve = match.upper()
+        if cve not in seen:
+            seen.add(cve)
+            cves.append(cve)
     if not cves:
         raise HTTPException(400, "上传内容中没有识别到 CVE 编号")
     original_total = len(cves)

@@ -46,6 +46,8 @@ function connect(task){if(state.sources.has(task.id))return; const source=new Ev
 $('#file-input').addEventListener('change',e=>{selectedFiles=[...e.target.files];renderFiles(selectedFiles);e.target.value=''});
 $('#folder-button').addEventListener('click',()=>$('#folder-input').click());
 $('#folder-input').addEventListener('change',e=>{selectedFiles=[...e.target.files];renderFiles(selectedFiles);e.target.value=''});
+fetch('/api/input-history').then(r=>r.json()).then(data=>{for(const cve of data.cves||[]){const option=document.createElement('option');option.value=option.textContent=cve;$('#input-history').appendChild(option)}}).catch(()=>{});
+$('#history-load').addEventListener('click',()=>{const value=$('#input-history').value;if(value)$('#cve-input').value=value});
 ['dragenter','dragover'].forEach(name=>$('#dropzone').addEventListener(name,e=>{e.preventDefault();$('#dropzone').classList.add('drag')}));
 ['dragleave','drop'].forEach(name=>$('#dropzone').addEventListener(name,e=>{e.preventDefault();$('#dropzone').classList.remove('drag')}));
 $('#dropzone').addEventListener('drop',e=>{selectedFiles=[...e.dataTransfer.files];renderFiles(selectedFiles)});
@@ -97,19 +99,20 @@ $('#task-list').addEventListener('click',async event=>{
 });
 
 document.querySelectorAll('.mode-card input').forEach(input=>input.addEventListener('change',()=>{document.querySelectorAll('.mode-card').forEach(card=>card.classList.toggle('active',card.querySelector('input').checked))}));
-$('#task-form').addEventListener('submit',async e=>{e.preventDefault(); const files=selectedFiles.slice(); if(countingFiles)return; if(!files.length){alert('请先选择文件或文件夹');return} const form=new FormData(); files.forEach(file=>form.append('files',file,file.webkitRelativePath||file.name)); form.append('mode',document.querySelector('input[name=mode]:checked').value); form.append('concurrency',$('#concurrency').value); form.append('docker_enabled',$('#docker-enabled').checked?'true':'false'); form.append('target_ip',$('#target-ip').value.trim()); form.append('local_only',String($('#local-only').checked)); form.append('environment_discovery',String($('#environment-discovery').checked)); form.append('output_dir',$('#output-dir').value.trim()); form.append('range_mode',rangeMode.value); form.append('range_count',rangeCount.value); form.append('range_start',$('#range-start').value); form.append('range_end',$('#range-end').value); const button=e.target.querySelector('button'); button.disabled=true; button.textContent='创建中…'; try{const res=await fetch('/api/tasks',{method:'POST',body:form}); const task=await res.json(); if(!res.ok)throw new Error(task.detail||'创建失败'); state.tasks.set(task.id,task); render(); connect(task); e.target.reset(); updateOptions(); document.querySelectorAll('.mode-card').forEach(card=>card.classList.toggle('active',card.querySelector('input').checked)); selectedFiles=[]; renderFiles([]);rangeMode.value='all';updateRangeControls()}catch(err){alert(err.message)}finally{button.disabled=false;button.innerHTML='<span>▶</span> 创建并运行任务'}});
+$('#task-form').addEventListener('submit',async e=>{e.preventDefault(); const files=selectedFiles.slice(); if(countingFiles)return; const typed=$('#cve-input').value.trim(); if(!files.length&&!typed){alert('请先选择文件、文件夹或输入 CVE');return} const form=new FormData(); files.forEach(file=>form.append('files',file,file.webkitRelativePath||file.name)); form.append('cve_text',typed); form.append('mode',document.querySelector('input[name=mode]:checked').value); form.append('concurrency',$('#concurrency').value); form.append('docker_enabled',$('#docker-enabled').checked?'true':'false'); form.append('target_ip',$('#target-ip').value.trim()); form.append('local_only',String($('#local-only').checked)); form.append('environment_discovery',String($('#environment-discovery').checked)); form.append('output_dir',$('#output-dir').value.trim()); form.append('range_mode',rangeMode.value); form.append('range_count',rangeCount.value); form.append('range_start',$('#range-start').value); form.append('range_end',$('#range-end').value); const button=e.target.querySelector('button'); button.disabled=true; button.textContent='创建中…'; try{const res=await fetch('/api/tasks',{method:'POST',body:form}); const task=await res.json(); if(!res.ok)throw new Error(task.detail||'创建失败'); state.tasks.set(task.id,task); render(); connect(task); e.target.reset(); updateOptions(); document.querySelectorAll('.mode-card').forEach(card=>card.classList.toggle('active',card.querySelector('input').checked)); selectedFiles=[]; renderFiles([]);rangeMode.value='all';updateRangeControls()}catch(err){alert(err.message)}finally{button.disabled=false;button.innerHTML='<span>▶</span> 创建并运行任务'}});
 fetch('/api/health').then(r=>r.json()).then(data=>{$('#target-ip').placeholder=data.target_ip||'服务端默认目标';$('#health-dot').style.background='#70c7a4';$('#health-text').textContent=`在线 · ${data.docker_default?'Docker 默认开启':'Docker 默认关闭'}`}).catch(()=>{}); loadTasks();
 
 function kbCard(title, value, detail, tone=''){
   return `<div class="knowledge-card ${tone}"><div class="knowledge-card-title">${escapeHtml(title)}</div><b>${escapeHtml(value)}</b><small>${escapeHtml(detail)}</small></div>`;
 }
 function renderKnowledge(snapshot){
-  const poc=snapshot.poc||{}, custom=snapshot.custom_poc||{}, nvd=snapshot.nvd||{}, pcap=snapshot.pcap||{};
+  const poc=snapshot.poc||{}, custom=snapshot.custom_poc||{}, nvd=snapshot.nvd||{}, cvelist=snapshot.cvelist||{}, pcap=snapshot.pcap||{};
   const years=(nvd.years_available||[]).join(', ')||'暂无';
   $('#knowledge-cards').innerHTML=[
     kbCard('本地 PoC 知识库', `${poc.truncated?'≥':''}${poc.files||0} 个文件`, `${poc.size_mb||0} MB · ${poc.path||''}`),
     kbCard('自定义 PoC', `${custom.files||0} 个文件`, `${custom.size_mb||0} MB · 可直接优先命中`, 'accent'),
     kbCard('NVD 本地 Feed', `${nvd.total_size_mb||0} MB`, `年份：${years}`, nvd.exists?'accent':'warning'),
+    kbCard('历史 CVE cvelistV5', `${cvelist.files||0} 个文件`, `${cvelist.size_mb||0} MB · 覆盖 1999–2001`, cvelist.exists?'accent':'warning'),
     kbCard('PCAP 证据库', `${pcap.files||0} 个文件`, `${pcap.size_mb||0} MB · ${pcap.path||''}`),
   ].join('');
 }
