@@ -5,6 +5,7 @@ from __future__ import annotations
 import httpx
 
 from cve_hunter.config import cfg
+from cve_hunter.tools.tavily_http import post_tavily
 
 
 def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
@@ -28,14 +29,11 @@ def search_web(query: str, max_results: int = 5) -> list[dict[str, str]]:
 def _search_tavily(query: str, max_results: int) -> list[dict[str, str]]:
     """Tavily 搜索。"""
     try:
-        from tavily import TavilyClient
-
-        client = TavilyClient(api_key=cfg.tavily_api_key)
-        results = client.search(
-            query=query,
-            max_results=max_results,
-            search_depth="advanced",
-            include_raw_content=False,
+        results = post_tavily(
+            "search", api_key=cfg.tavily_api_key,
+            payload={"query": query, "max_results": max_results,
+                     "search_depth": "advanced", "include_raw_content": False},
+            proxy=cfg.httpx_proxy,
         )
         return [
             {
@@ -59,6 +57,7 @@ def _search_duckduckgo(query: str, max_results: int) -> list[dict[str, str]]:
             timeout=cfg.request_timeout,
             follow_redirects=True,
             proxy=cfg.httpx_proxy,
+            trust_env=False,
         )
         resp.raise_for_status()
         results = []

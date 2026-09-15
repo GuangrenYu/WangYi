@@ -1909,7 +1909,11 @@ def _next_phase_after_verify(state: CVEState) -> str:
     if state.local_only and not state.allow_reference_links:
         return "generate_report"
     if state.local_only and state.allow_reference_links:
-        return "reference_analysis"
+        if "poc_from_nvd" not in state.phases_tried:
+            return "poc_from_nvd"
+        if state.nvd_references and "reference_analysis" not in state.phases_tried:
+            return "reference_analysis"
+        return "generate_report"
     # local-container：已有本地候选则不再远程发散；无本地候选时仅允许本地 nuclei
     if _local_container_skip_remote(state):
         if _has_local_kb_candidates(state):
@@ -2007,6 +2011,11 @@ def route_after_local_kb(state: CVEState) -> str:
 def route_after_phase(state: CVEState) -> str:
     """通用路由：根据 current_phase 决定下一个节点。"""
     phase = state.current_phase
+    if state.local_only:
+        if phase in {"nuclei_search", "exploitdb_search", "imfht_search", "web_search"}:
+            return _next_phase_after_verify(state)
+        if not state.allow_reference_links and phase in {"reference_analysis", "poc_from_refs"}:
+            return "generate_report"
     # PoC-only runs stop as soon as the discovery chain produced a candidate;
     # if a source had no candidate, the normal fallback search continues.
     if getattr(state, "stop_after", "") == "poc" and phase == "verify_poc":

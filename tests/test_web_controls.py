@@ -49,6 +49,8 @@ class WebControlTests(unittest.TestCase):
                       "range_mode": "slice", "range_start": "2", "range_end": "999", "output_dir": self.tmp.name})
             self.assertEqual(response.status_code, 200)
             task = response.json()
+            self.assertRegex(Path(task["output_dir"]).name, r"^\d{4}-\d{2}-\d{2}_\d{4}_" + task["id"] + r"$")
+            self.assertTrue(Path(task["output_dir"]).is_dir())
             self.assertEqual(task["target_ip"], "192.0.2.1")
             self.assertTrue(task["local_only"])
             self.assertFalse(task["environment_discovery"])

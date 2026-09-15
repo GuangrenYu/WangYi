@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 import unittest
 import tempfile
 from pathlib import Path
@@ -15,6 +16,8 @@ from cve_hunter.graph import (
     node_poc_from_refs,
     node_verify_poc,
     node_poc_from_nvd,
+    route_after_phase,
+    _next_phase_after_verify,
 )
 from cve_hunter.state import CVEState
 from cve_hunter.status_codes import EXECUTION_POLICY_BLOCKED, POC_SOURCE_ACCESS_FAILED
@@ -25,6 +28,24 @@ def _raw(path: str) -> str:
 
 
 class GraphCandidateTests(unittest.TestCase):
+    def test_local_reference_failure_stops_without_remote_search(self):
+        state = CVEState(local_only=True, allow_reference_links=True,
+                         phases_tried=["poc_from_nvd", "reference_analysis"],
+                         nvd_references=["https://example.test/advisory"])
+        update = node_poc_from_refs(state)
+        state = replace(state, **update)
+        self.assertEqual(route_after_phase(state), "generate_report")
+        self.assertEqual(_next_phase_after_verify(state), "generate_report")
+        for phase in ["nuclei_search", "exploitdb_search", "imfht_search", "web_search"]:
+            self.assertEqual(route_after_phase(replace(state, current_phase=phase)), "generate_report")
+
+    def test_local_reference_verification_does_not_loop(self):
+        state = CVEState(local_only=True, allow_reference_links=True,
+                         phases_tried=["poc_from_nvd"], nvd_references=["https://example.test/advisory"])
+        self.assertEqual(_next_phase_after_verify(state), "reference_analysis")
+        state.phases_tried.append("reference_analysis")
+        self.assertEqual(_next_phase_after_verify(state), "generate_report")
+
     @patch("cve_hunter.graph.invoke_llm", return_value='```http\nGET /from-local HTTP/1.1\nHost: {{TARGET_HOST}}\n\n```')
     def test_local_context_generation_creates_candidate(self, invoke):
         state = CVEState(cve_id="CVE-2001-0075", local_only=True, nvd_description="local reproduction path /from-local")

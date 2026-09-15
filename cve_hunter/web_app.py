@@ -567,7 +567,8 @@ async def create_task(
     base_output = Path(requested_output).expanduser() if requested_output else Path(cfg.output_dir) / "web_runs"
     if not base_output.is_absolute():
         base_output = ROOT / base_output
-    actual_output = base_output / task_id
+    run_name = f"{datetime.now().astimezone():%Y-%m-%d_%H%M}_{task_id}"
+    actual_output = base_output / run_name
     actual_output.mkdir(parents=True, exist_ok=True)
     selection = {
         "mode": range_mode,
