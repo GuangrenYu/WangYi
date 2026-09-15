@@ -16,6 +16,20 @@ from cve_hunter.agents import run_environment_agent
 
 
 class OfflineTests(unittest.TestCase):
+    def test_cvelist_v5_is_used_for_historical_cve(self):
+        item = {"cveMetadata": {"cveId": "CVE-1999-0001"}, "containers": {"cna": {
+            "descriptions": [{"lang": "en", "value": "Historical issue"}],
+            "references": [{"url": "https://example.test/advisory"}],
+            "affected": [{"vendor": "example", "product": "app", "versions": [{"version": "1.0"}]}],
+            "metrics": [{"cvssV3_1": {"baseScore": 7.5, "baseSeverity": "HIGH"}}]}}}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "1999" / "0xxx" / "CVE-1999-0001.json"
+            path.parent.mkdir(parents=True)
+            path.write_text(json.dumps(item), encoding="utf-8")
+            with patch("cve_hunter.tools.nvd_local.cfg", replace(cfg, cvelist_dir=tmp, nvd_local_dir=tmp + "/nvd")):
+                result = query_nvd("CVE-1999-0001", local_only=True)
+            self.assertEqual(result["nvd_source"], "cvelist")
+            self.assertEqual(result["cvss_score"], 7.5)
     def test_relative_windows_path_is_anchored_to_project(self):
         with patch("cve_hunter.tools.nvd_local.cfg", replace(cfg, nvd_local_dir="poc_kb\\nvd")):
             self.assertEqual(nvd_local._nvd_local_dir(), Path(nvd_local.__file__).resolve().parents[2] / "poc_kb" / "nvd")

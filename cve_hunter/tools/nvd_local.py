@@ -78,6 +78,11 @@ def _nvd_local_dir() -> Path:
     return path if path.is_absolute() else Path(__file__).resolve().parents[2] / path
 
 
+def _cvelist_dir() -> Path:
+    path = Path(str(getattr(cfg, "cvelist_dir", "third_party/cvelistV5/cves")).replace("\\", "/")).expanduser()
+    return path if path.is_absolute() else Path(__file__).resolve().parents[2] / path
+
+
 def _feed_url(year: int) -> str:
     return f"{NVD_FEED_BASE}/{_YEAR_FILE.format(year=year)}"
 
@@ -241,6 +246,10 @@ def query_nvd_local(cve_id: str) -> dict | None:
     if year is None:
         return None
 
+    cvelist_result = _query_cvelist(cve_id, year)
+    if cvelist_result is not None:
+        return cvelist_result
+
     local_dir = _nvd_local_dir()
 
     # 1) 先查对应年份文件
@@ -266,6 +275,50 @@ def query_nvd_local(cve_id: str) -> dict | None:
     if errors:
         raise ValueError("本地 Feed 读取失败：" + "; ".join(errors))
     return None
+
+
+def _query_cvelist(cve_id: str, year: int) -> dict | None:
+    """Read CVEProject/cvelistV5 JSON for historical years absent from NVD feeds."""
+    root = _cvelist_dir()
+    if not root.exists():
+        return None
+    matches = list(root.glob(f"{year}/**/{cve_id.upper()}.json"))
+    if not matches:
+        matches = list(root.glob(f"{year}/**/{cve_id.lower()}.json"))
+    if not matches:
+        return None
+    try:
+        item = json.loads(matches[0].read_text(encoding="utf-8"))
+        containers = item.get("containers") or {}
+        cna = containers.get("cna") or {}
+        descriptions = cna.get("descriptions") or []
+        description = next((d.get("value", "") for d in descriptions if d.get("lang") == "en"), "")
+        if not description and descriptions:
+            description = descriptions[0].get("value", "")
+        refs = normalize_reference_urls([r.get("url", "") for r in cna.get("references", [])])
+        products = []
+        for affected in cna.get("affected", []) or []:
+            vendor = affected.get("vendor", "")
+            product = affected.get("product", "")
+            for version in affected.get("versions", []) or []:
+                products.append(f"{vendor}:{product}:{version.get('version', '')}")
+        metrics = cna.get("metrics", []) or []
+        score = 0.0
+        severity = ""
+        vector = ""
+        for metric in metrics:
+            data = metric.get("cvssV3_1") or metric.get("cvssV3_0") or metric.get("cvssV2") or metric.get("cvssV4_0") or {}
+            if data:
+                score = data.get("baseScore", 0.0)
+                severity = data.get("baseSeverity", "")
+                vector = data.get("vectorString", "")
+                break
+        return {"cve_id": cve_id, "description": description, "references": refs,
+                "affected_products": products, "cvss_score": score, "cvss_severity": severity,
+                "nvd_source": "cvelist", "metadata": {"feed_path": str(matches[0]), "cvss_vector": vector,
+                    "cvelist_metadata": item.get("cveMetadata", {}), "provider_metadata": containers.get("adp", [])}}
+    except (OSError, ValueError, TypeError) as exc:
+        raise ValueError(f"cvelistV5 条目读取失败: {matches[0]}: {exc}") from exc
 
 
 def _load_feed(filepath: Path) -> dict:

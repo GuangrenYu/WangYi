@@ -74,6 +74,7 @@ class Config:
 
     # 本地 NVD 数据库目录
     nvd_local_dir: str = field(default_factory=lambda: os.getenv("NVD_LOCAL_DIR", "poc_kb/nvd"))
+    cvelist_dir: str = field(default_factory=lambda: os.getenv("CVELIST_DIR", "third_party/cvelistV5/cves"))
 
     # 输出目录
     output_dir: str = field(default_factory=lambda: os.getenv("OUTPUT_DIR", "output"))
