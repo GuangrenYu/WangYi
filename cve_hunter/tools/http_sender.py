@@ -319,8 +319,8 @@ def _capture_output_path(host: str, cve_id: str = "", now: datetime | None = Non
     return output_dir / f"{cve_label}.pcap"
 
 
-def finalize_capture(pcap_file_path: str, *, keep: bool) -> str:
-    """Promote a pending local capture on validation success, otherwise remove it.
+def finalize_capture(pcap_file_path: str, *, keep: bool = True) -> str:
+    """Promote a pending local capture and retain it by default.
 
     Destination filename is always normalised to ``CVE-XXXX-XXXXX.pcap`` so that
     database-path captures (whose pending name carries port/timestamp/interface

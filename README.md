@@ -161,12 +161,10 @@ python main.py
 
 | 文件 | 说明 |
 |------|------|
-| `result.json` | 结构化复现结果 |
-| `report.md` | AI 生成的分析报告 |
-| `poc.http` | 原始 HTTP 请求 PoC |
-| `poc.yaml` | Nuclei YAML 模板（如有） |
+| `result.json` | 状态、PoC、执行结果和证据的唯一汇总 |
+| `request.json` | 多步骤请求或结构化协议执行的请求规格（按需生成） |
 
-只有最终验证通过（当前 CVE 的 IPS 命中或目标侧 oracle 成功）的 PCAP 才会保存为 `data/cve/pcaps/YYYY-MM-DD/<CVE-ID>.pcap`；失败候选的临时抓包会自动删除。同一天同一 CVE 的后续成功案例会覆盖该文件。可用 `PCAP_OUTPUT_DIR` 修改归档根目录。
+每次发包产生的 PCAP 默认都会保存为 `data/cve/pcaps/YYYY-MM-DD/<CVE-ID>.pcap`，即使当前验证条件未命中也会保留，便于后续检查和改进匹配规则。同一天同一 CVE 的多个抓包会保留数据量更大的文件。可用 `PCAP_OUTPUT_DIR` 修改归档根目录。最终状态统一写入任务目录下的 `result.json`；只有多步骤请求或结构化协议执行需要时才会额外生成 `request.json`。
 
 ### 本地发包与抓包服务（Windows）
 
@@ -310,6 +308,39 @@ CVH_APP_DIR=$HOME/cve-hunter bash deploy_ubuntu.sh
 
 ```bash
 git clone <你的仓库地址> "$HOME/cve-hunter" && cd "$HOME/cve-hunter" && bash deploy_ubuntu.sh
+```
+
+首次迁移前先安装系统依赖：
+
+```bash
+sudo apt-get update
+sudo apt-get install -y python3 python3-venv python3-pip tar gzip rsync
+```
+
+### Ubuntu 一键迁移备份
+
+在旧机器项目目录执行。备份包含 `.env`、本地 NVD Feed、PCAP、PoC 知识库和 `output` 历史结果；`.git`、虚拟环境和缓存会排除：
+
+```bash
+cd /path/to/cve-hunter
+chmod +x scripts/backup_ubuntu.sh scripts/restore_ubuntu.sh
+bash scripts/backup_ubuntu.sh "$PWD" "$HOME/cve-hunter-backups"
+```
+
+把生成的 `cve-hunter-*.tar.gz` 和同名 `.sha256` 复制到新机器后恢复：
+
+```bash
+scp cve-hunter-*.tar.gz cve-hunter-*.tar.gz.sha256 user@NEW_HOST:/tmp/
+ssh user@NEW_HOST
+sudo mkdir -p /opt/cve-hunter
+sudo bash /tmp/restore_ubuntu.sh /tmp/cve-hunter-YYYYMMDD_HHMMSS.tar.gz /opt/cve-hunter
+sudo -u "$USER" bash -lc 'cd /opt/cve-hunter && source .venv/bin/activate && bash run_web.sh'
+```
+
+如果恢复脚本也需要传到新机器：
+
+```bash
+scp scripts/restore_ubuntu.sh user@NEW_HOST:/tmp/
 ```
 
 Web 工作台支持选择输出目录、执行输入文件的全部/前 N 条/后 N 条/第 M 到第 K 条，并在服务重启后保留最近任务记录。

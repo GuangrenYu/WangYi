@@ -10,8 +10,6 @@
 from __future__ import annotations
 
 import json
-import shutil
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -378,15 +376,17 @@ def write_repro_bundle(
     milestones: dict[str, Any] | None = None,
     attempt_history: list[dict[str, Any]] | None = None,
     execution_spec: dict[str, Any] | None = None,
+    request_steps: list[dict[str, Any]] | None = None,
     version_evidence: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """写入 output/<CVE>/repro/ 可重放包。"""
-    repro_dir = Path(output_dir) / "repro"
-    trigger_dir = repro_dir / "trigger"
-    evidence_dir = repro_dir / "evidence"
-    repro_dir.mkdir(parents=True, exist_ok=True)
-    trigger_dir.mkdir(parents=True, exist_ok=True)
-    evidence_dir.mkdir(parents=True, exist_ok=True)
+    """归档请求所需的最小产物。
+
+    ``result.json`` 是状态和执行结果的唯一汇总文件，由工作流最终节点写入。
+    这里仅保留发包生成的 PCAP，并在多步骤/结构化执行确有需要时写入
+    ``request.json``；PoC、executor/oracle 和复现说明不再各自落盘。
+    """
+    output_root = Path(output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
 
     artifacts: dict[str, str] = {}
     errors: list[str] = []
@@ -395,167 +395,36 @@ def write_repro_bundle(
         _LEGACY_FAILURE.get(failure_class, failure_class)
     )
 
-    if poc_raw_http:
-        path = trigger_dir / "poc.http"
-        path.write_text(poc_raw_http, encoding="utf-8")
-        artifacts["poc_http"] = str(path)
-    if poc_nuclei_yaml:
-        path = trigger_dir / "poc.yaml"
-        path.write_text(poc_nuclei_yaml, encoding="utf-8")
-        artifacts["poc_yaml"] = str(path)
-    if execution_spec:
-        path = trigger_dir / "execution_spec.json"
-        path.write_text(json.dumps(execution_spec, ensure_ascii=False, indent=2), encoding="utf-8")
-        artifacts["execution_spec"] = str(path)
-
-    last_success = None
-    for item in reversed(attempt_history or []):
-        if item.get("request_success"):
-            last_success = item
-            break
-    if last_success:
-        path = evidence_dir / "last_successful_attempt.json"
-        path.write_text(json.dumps(last_success, ensure_ascii=False, indent=2), encoding="utf-8")
-        artifacts["last_successful_attempt"] = str(path)
-
-    if oracle_result:
-        path = evidence_dir / "oracle.json"
-        path.write_text(json.dumps(oracle_result, ensure_ascii=False, indent=2), encoding="utf-8")
-        artifacts["oracle"] = str(path)
-    if executor_result:
-        path = evidence_dir / "executor.json"
-        slim = dict(executor_result)
-        body = str(slim.get("body") or "")
-        if len(body) > 4000:
-            slim["body"] = body[:4000] + "\n...<truncated>..."
-        path.write_text(json.dumps(slim, ensure_ascii=False, indent=2), encoding="utf-8")
-        artifacts["executor"] = str(path)
-
-    version_payload = version_evidence
-    if version_payload is None:
-        version_payload = build_version_evidence(
-            cve_id=cve_id,
-            attack_environment=attack_environment,
-            execution_spec=execution_spec,
-            executor_result=executor_result,
-            oracle_result=oracle_result,
-        )
-    if version_payload:
-        path = evidence_dir / "version_evidence.json"
-        path.write_text(json.dumps(version_payload, ensure_ascii=False, indent=2), encoding="utf-8")
-        artifacts["version_evidence"] = str(path)
+    # Raw HTTP and single request PoCs already live in result.json. A separate
+    # request file is useful only when replay needs ordering or protocol fields.
+    if request_steps or execution_spec:
+        request_path = output_root / "request.json"
+        request_payload: dict[str, Any] = {}
+        if request_steps:
+            request_payload["request_steps"] = request_steps
+        if execution_spec:
+            request_payload["execution_spec"] = execution_spec
+        request_path.write_text(json.dumps(request_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        artifacts["request"] = str(request_path)
 
     if pcap_file_path:
         src = Path(pcap_file_path)
         if src.is_file():
-            dest = evidence_dir / src.name
-            try:
-                shutil.copy2(src, dest)
-                artifacts["pcap"] = str(dest)
-            except OSError as exc:
-                errors.append(f"复制 pcap 失败: {exc}")
+            # Keep the canonical capture in PCAP_OUTPUT_DIR. Copying it into
+            # repro would create a second source of truth.
+            artifacts["pcap"] = str(src)
         else:
             errors.append(f"pcap 不存在: {pcap_file_path}")
 
-    env_path = repro_dir / "environment.json"
-    env_path.write_text(
-        json.dumps(
-            {
-                "attack_environment": attack_environment or {},
-                "environment_spec": environment_spec or {},
-            },
-            ensure_ascii=False,
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
-    artifacts["environment"] = str(env_path)
-
-    teardown_path = repro_dir / "teardown.json"
-    teardown_path.write_text(
-        json.dumps(environment_teardown_result or {}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    artifacts["teardown"] = str(teardown_path)
-
-    if milestones:
-        ms_path = repro_dir / "milestones.json"
-        ms_path.write_text(json.dumps(milestones, ensure_ascii=False, indent=2), encoding="utf-8")
-        artifacts["milestones"] = str(ms_path)
-
     complete = bool(
         tier in {SUCCESS_TIER_L2, SUCCESS_TIER_L3, SUCCESS_TIER_L4}
-        and (
-            artifacts.get("poc_http")
-            or artifacts.get("poc_yaml")
-            or artifacts.get("execution_spec")
-            or artifacts.get("last_successful_attempt")
-        )
-        and (artifacts.get("oracle") or artifacts.get("pcap") or artifacts.get("executor"))
-        and artifacts.get("environment")
-        and artifacts.get("teardown")
+        and (poc_raw_http or poc_nuclei_yaml or request_steps or execution_spec)
+        and (artifacts.get("pcap") or executor_result or oracle_result)
         and not errors
     )
 
-    manifest = {
-        "cve_id": cve_id,
-        "status": status,
-        "status_code": normalize_status_code(status_code),
-        "message": message,
-        "success_tier": tier,
-        "failure_class": fclass,
-        "success_level": success_level,
-        "poc_source": poc_source,
-        "complete": complete,
-        "artifacts": artifacts,
-        "errors": errors,
-        "timestamp": datetime.now().isoformat(),
-    }
-    manifest_path = repro_dir / "manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-
-    replay = [
-        f"# {cve_id} 重放说明",
-        "",
-        f"- 状态: `{status}` / `{normalize_status_code(status_code)}`",
-        f"- 成功层级: `{tier}`",
-        f"- 失败归因: `{fclass}`",
-        f"- 归档完整: `{complete}`",
-        "",
-        "## 环境",
-        "",
-        "见 `environment.json`。仅在授权本地靶场重放。",
-        "",
-        "## 触发",
-        "",
-    ]
-    if artifacts.get("poc_http"):
-        replay.append("- HTTP: `trigger/poc.http`")
-    if artifacts.get("poc_yaml"):
-        replay.append("- Nuclei: `trigger/poc.yaml`")
-    if artifacts.get("execution_spec"):
-        replay.append("- 执行规格: `trigger/execution_spec.json`")
-    if not any(artifacts.get(k) for k in ("poc_http", "poc_yaml", "execution_spec")):
-        replay.append("- 无独立触发文件")
-    replay.extend(
-        [
-            "",
-            "## 证据",
-            "",
-            "- `evidence/` 下 oracle/executor/pcap",
-            "- `teardown.json` 回收记录",
-            "",
-            "```bash",
-            f"python main.py {cve_id} --local-container",
-            "```",
-            "",
-        ]
-    )
-    (repro_dir / "replay.md").write_text("\n".join(replay), encoding="utf-8")
-
     return {
-        "path": str(repro_dir),
-        "manifest_path": str(manifest_path),
+        "path": str(output_root),
         "complete": complete,
         "artifacts": artifacts,
         "errors": errors,

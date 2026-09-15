@@ -41,7 +41,6 @@ from cve_hunter.poc_parser import extract_http_requests, parse_poc_candidates_js
 from cve_hunter.prompts.templates import (
     POC_GENERATION_FROM_REFS,
     POC_GENERATION_FROM_SEARCH,
-    ANALYSIS_REPORT,
 )
 from cve_hunter.tools.nvd import query_nvd
 from cve_hunter.tools.web_extract import extract_url_content
@@ -1004,11 +1003,10 @@ def node_verify_poc(state: CVEState) -> dict:
     ips_matched = oracle["ips_matched"]
     generic_ips_matched = oracle["generic_ips_matched"]
     target_oracle = oracle["target_oracle"]
-    validation_succeeded = bool(ips_matched or target_oracle.get("success"))
-    result["pcap_file_path"] = finalize_capture(
-        result.get("pcap_file_path", ""),
-        keep=validation_succeeded,
-    )
+    # A capture is traffic evidence even when the oracle/IPS condition misses.
+    # Keep every capture produced by a request so failed validations remain
+    # inspectable and can be used to improve matching rules later.
+    result["pcap_file_path"] = finalize_capture(result.get("pcap_file_path", ""))
     request_status = "skipped" if result.get("policy_blocked") or result.get("skipped") else ("passed" if success else "failed")
     milestones = _mark_milestone_map(
         milestones,
@@ -1290,53 +1288,13 @@ def node_generate_report(state: CVEState) -> dict:
         cleanup_status=cleanup_status,
     )
 
-    prompt = ANALYSIS_REPORT.format(
-        cve_id=state.cve_id,
-        description=state.nvd_description or "无",
-        cvss_score=state.cvss_score,
-        cvss_severity=state.cvss_severity or "无",
-        affected_products=", ".join(state.affected_products[:5]) or "无",
-        vuln_type=state.vuln_type or "未知",
-        poc_source=state.poc_source or "无",
-        poc_candidate_count=len(state.poc_candidates),
-        poc_candidate_summary=_poc_candidate_summary(state),
-        poc_preview=_poc_preview(state),
-        run_mode=getattr(cfg, "run_mode", "plan_only"),
-        target_allowlist=", ".join(getattr(cfg, "target_allowlist", [])) or "无",
-        phases_tried=", ".join(state.phases_tried) or "无",
-        status=final_status,
-        status_code=final_code,
-        error_messages="; ".join(state.error_messages[-3:]) or "无",
-        http_status_code=state.http_status_code or "无",
-        ips_matched=state.ips_matched,
-        generic_ips_matched=state.generic_ips_matched,
-        ips_match_summary=json.dumps(state.ips_match_summary, ensure_ascii=False) if state.ips_match_summary else "无",
-        pcap_file_path=state.pcap_file_path or "无",
-    )
-
-    if state.generate_report:
-        try:
-            report = invoke_llm(prompt)
-        except Exception as e:
-            report = f"# {state.cve_id} 复现报告\n\n生成报告失败: {e}\n\n状态: {final_status}"
-    else:
-        report = ""
+    # Archiving is deterministic. Analysis/report LLM calls belong to an
+    # explicit analysis phase and must not run while persisting results.
+    report = ""
 
     # 归档所有产物
     output_dir = _state_output_root(state) / state.cve_id
     output_dir.mkdir(parents=True, exist_ok=True)
-
-    if report:
-        with open(output_dir / "report.md", "w", encoding="utf-8") as f:
-            f.write(report)
-
-    if state.poc_raw_http:
-        with open(output_dir / "poc.http", "w", encoding="utf-8") as f:
-            f.write(state.poc_raw_http)
-
-    if state.poc_nuclei_yaml:
-        with open(output_dir / "poc.yaml", "w", encoding="utf-8") as f:
-            f.write(state.poc_nuclei_yaml)
 
     version_evidence = build_version_evidence(
         cve_id=state.cve_id,
@@ -1367,6 +1325,11 @@ def node_generate_report(state: CVEState) -> dict:
         milestones=milestones,
         attempt_history=state.attempt_history,
         execution_spec=getattr(state, "execution_spec", {}) or {},
+        request_steps=(
+            (_current_candidate(state) or {}).get("request_steps")
+            if isinstance((_current_candidate(state) or {}).get("request_steps"), list)
+            else None
+        ),
         version_evidence=version_evidence,
     )
     # Promote to L4 when bundle is complete after L2/L3 evidence.
@@ -1381,15 +1344,6 @@ def node_generate_report(state: CVEState) -> dict:
         cleanup_status=cleanup_status,
     )
     repro_bundle["success_tier"] = success_tier
-    try:
-        manifest_path = Path(repro_bundle["manifest_path"])
-        if manifest_path.is_file():
-            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-            manifest["success_tier"] = success_tier
-            manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
-    except Exception:
-        pass
-
     report_data = {
         "cve_id": state.cve_id,
         "status": final_status,

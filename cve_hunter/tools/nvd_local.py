@@ -16,6 +16,7 @@ import os
 import re
 import sys
 import time
+from contextlib import ExitStack
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -52,7 +53,15 @@ def _feed_url(year: int) -> str:
 
 
 def _meta_url(year: int) -> str:
-    return f"{_feed_url(year)}.meta"
+    return f"{NVD_FEED_BASE}/nvdcve-2.0-{year}.meta"
+
+
+def _meta_url_for_feed(feed_url: str) -> str:
+    """Return the NVD metadata URL for a ``.json.gz`` feed URL."""
+    suffix = ".json.gz"
+    if feed_url.endswith(suffix):
+        return f"{feed_url[:-len(suffix)]}.meta"
+    return f"{feed_url}.meta"
 
 
 def _cve_year(cve_id: str) -> int | None:
@@ -96,14 +105,42 @@ def download_nvd_feeds(
         downloads.append((_MODIFIED_FILE, f"{NVD_FEED_BASE}/{_MODIFIED_FILE}", "modified"))
         downloads.append((_RECENT_FILE, f"{NVD_FEED_BASE}/{_RECENT_FILE}", "recent"))
 
-    with httpx.Client(timeout=300, follow_redirects=True, proxy=cfg.httpx_proxy) as client:
+    # Prefer the configured proxy, but do not make a stale local proxy block
+    # feed updates. A transport error falls back to a direct client.
+    proxies = [cfg.httpx_proxy] if cfg.httpx_proxy else []
+    if None not in proxies:
+        proxies.append(None)
+    with ExitStack() as stack:
+        clients = [
+            stack.enter_context(
+                httpx.Client(
+                    timeout=httpx.Timeout(300.0, connect=10.0),
+                    follow_redirects=True,
+                    proxy=proxy,
+                    trust_env=False,
+                )
+            )
+            for proxy in proxies
+        ]
+
+        def get_with_fallback(url: str):
+            last_error = None
+            for client in clients:
+                try:
+                    return client.get(url)
+                except (httpx.RequestError, httpx.TimeoutException) as exc:
+                    last_error = exc
+            if last_error is not None:
+                raise last_error
+            raise RuntimeError("No NVD HTTP route available")
+
         for filename, url, label in downloads:
             filepath = local_dir / filename
 
             if filepath.exists() and not force:
                 # 检查远端 meta 决定是否需要更新
                 try:
-                    meta_resp = client.get(f"{url}.meta")
+                    meta_resp = get_with_fallback(_meta_url_for_feed(url))
                     if meta_resp.status_code == 200:
                         remote_sha = _parse_meta_sha256(meta_resp.text)
                         if remote_sha and _file_sha256(filepath) == remote_sha:
@@ -118,7 +155,7 @@ def download_nvd_feeds(
                 progress_callback(label, "download", url)
 
             try:
-                resp = client.get(url)
+                resp = get_with_fallback(url)
                 resp.raise_for_status()
                 # Write atomically so an interrupted download cannot corrupt a
                 # previously usable feed.

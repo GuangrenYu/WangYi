@@ -69,7 +69,13 @@ async function pollNvdJob(jobId){
       if(job.status==='completed'||job.status==='failed'){
         clearInterval(timer); $('#nvd-update').disabled=false; loadKnowledge();
         if(job.status==='failed') status.textContent=`下载失败：${job.error||'未知错误'}`;
-        else status.textContent=`更新完成：下载 ${job.result?.downloaded?.length||0}，跳过 ${job.result?.skipped?.length||0}`;
+        else {
+          const result=job.result||{}, errors=result.errors||[];
+          const summary=`更新完成：下载 ${result.downloaded?.length||0}，跳过 ${result.skipped?.length||0}`;
+          status.textContent=errors.length
+            ? `${summary}，失败 ${errors.length}：${errors[0].label||''} ${errors[0].error||'未知错误'}`
+            : summary;
+        }
       }
     }catch(error){clearInterval(timer);$('#nvd-update').disabled=false;status.textContent=`状态读取失败：${error.message}`;}
   },1000);
