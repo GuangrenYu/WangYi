@@ -54,7 +54,7 @@ def test_gzip_feed_with_legacy_cve_items_is_read_even_without_gz_suffix(tmp_path
     from cve_hunter.tools import nvd_local
     with patch.object(nvd_local, "cfg", replace(nvd_local.cfg, nvd_local_dir=str(tmp_path), cvelist_dir=str(tmp_path / "none"))):
         result = query_nvd("CVE-2002-0001", local_only=True)
-    assert result["description"] == "legacy"
+    assert result.get("description") == "legacy", result
 
 
 def test_nvd_request_falls_back_to_direct_when_proxy_is_unreachable():

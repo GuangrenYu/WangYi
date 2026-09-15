@@ -258,7 +258,7 @@ def query_nvd_local(cve_id: str) -> dict | None:
              for label in ("modified", "recent", str(year))
              for suffix in (".json.gz", ".json", ".gz")]
     # Accept renamed or nested feeds as long as their filename identifies the year.
-    files += [p for p in local_dir.rglob("*") if p.is_file() and str(year) in p.name and p.suffix in {".gz", ".json"}]
+    files += [p for p in local_dir.rglob("*") if p.is_file() and str(year) in p.name]
     files = list(dict.fromkeys(files))
     files = [path for path in files if path.is_file()]
     if not files:
