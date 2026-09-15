@@ -510,7 +510,7 @@ def node_local_kb_search(state: CVEState) -> dict:
                 updates["current_phase"] = "poc_from_nvd" if state.local_only else "generate_report"
                 return updates
             console.print("  [yellow]⚠ 本地 KB 无可用 HTTP/SQL PoC，继续远程搜索[/]")
-            updates["current_phase"] = "reference_analysis"
+            updates["current_phase"] = "poc_from_nvd" if state.local_only else "reference_analysis"
             return updates
 
         if result.get("error"):
@@ -530,7 +530,7 @@ def node_local_kb_search(state: CVEState) -> dict:
 
     return {
         "phases_tried": state.phases_tried + ["local_kb_search"],
-        "current_phase": "reference_analysis",
+        "current_phase": "poc_from_nvd" if state.local_only else "reference_analysis",
     }
 
 
@@ -544,7 +544,8 @@ def node_poc_from_nvd(state: CVEState) -> dict:
         requests.extend(extract_http_requests(block))
     updates = {"phases_tried": state.phases_tried + ["poc_from_nvd"]}
     prompt = f"""Generate a conservative PoC candidate for {state.cve_id} using ONLY this local CVE data.
-Do not use references or invent endpoints. If evidence is insufficient, return {{\"candidates\":[]}}.
+Use explicit paths, parameters, payloads, or reproduction steps present in the data. Do not use references or invent endpoints.
+If no executable evidence exists, return {{\"candidates\":[]}}.
 Return JSON with candidates containing raw_http only when grounded in supplied data.
 LOCAL DATA:\n{state.nvd_description}\n{state.local_knowledge_context}\n{json.dumps(state.nvd_metadata, ensure_ascii=False)[:6000]}\nProducts: {', '.join(state.affected_products[:10])}"""
     try:

@@ -57,7 +57,7 @@
           <label for="target-ip">目标 IP</label>
           <input id="target-ip" class="text-input" type="text" placeholder="使用服务端默认目标">
           <label class="check-field"><input id="local-only" type="checkbox"><span>仅使用本地知识库和 NVD</span></label>
-          <small class="field-hint">不联网搜索、不调用云端模型、不下载环境。验证仍会向目标发包；资料不足时报告无可用 PoC。</small>
+          <small class="field-hint">不联网搜索参考资料；仅把本地 NVD、cvelist、PoC、PCAP 和上传内容交给模型生成候选。验证仍会向目标发包。</small>
           <label class="check-field"><input id="environment-discovery" type="checkbox"><span>发现复现环境候选（可选）</span></label>
           <small class="field-hint">默认直接使用目标 IP；开启后才查找复现环境。</small>
         </div>

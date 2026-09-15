@@ -14,6 +14,7 @@ from cve_hunter.graph import (
     node_generate_report,
     node_poc_from_refs,
     node_verify_poc,
+    node_poc_from_nvd,
 )
 from cve_hunter.state import CVEState
 from cve_hunter.status_codes import EXECUTION_POLICY_BLOCKED, POC_SOURCE_ACCESS_FAILED
@@ -24,6 +25,12 @@ def _raw(path: str) -> str:
 
 
 class GraphCandidateTests(unittest.TestCase):
+    @patch("cve_hunter.graph.invoke_llm", return_value='```http\nGET /from-local HTTP/1.1\nHost: {{TARGET_HOST}}\n\n```')
+    def test_local_context_generation_creates_candidate(self, invoke):
+        state = CVEState(cve_id="CVE-2001-0075", local_only=True, nvd_description="local reproduction path /from-local")
+        result = node_poc_from_nvd(state)
+        self.assertEqual(result["poc_candidates"][0]["source"], "local_nvd")
+        invoke.assert_called_once()
     def test_candidate_update_selects_first_and_keeps_all_candidates(self):
         state = CVEState()
         candidates = _raw_http_candidates([_raw("/first"), _raw("/second")], source="reference")

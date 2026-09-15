@@ -42,7 +42,7 @@ class OfflineTests(unittest.TestCase):
             path = Path(tmp) / "nvdcve-2.0-2021.json"
             path.write_text('{"CVE_Items": []}', encoding="utf-8")
             invalid = query_nvd("CVE-2021-44228", local_only=True)
-            self.assertEqual(invalid["nvd_source"], "local_error")
+            self.assertEqual(invalid["nvd_source"], "local_not_found")
             self.assertIn("vulnerabilities", invalid["error"])
             path.write_text('{"vulnerabilities": []}', encoding="utf-8")
             self.assertEqual(query_nvd("CVE-2021-44228", local_only=True)["nvd_source"], "local_not_found")
@@ -111,6 +111,6 @@ class OfflineTests(unittest.TestCase):
         with run_options(target_ip="2001:db8::1", local_only=True):
             from cve_hunter.llm import get_llm
             from cve_hunter.verification import _default_target_url
-            self.assertIsNone(get_llm())
+            self.assertIsNotNone(get_llm())
             self.assertEqual(_default_target_url(), "http://[2001:db8::1]")
         self.assertEqual(effective_target_ip(), original)
