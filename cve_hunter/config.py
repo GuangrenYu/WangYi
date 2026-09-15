@@ -6,7 +6,11 @@ import os
 from dataclasses import dataclass, field
 from dotenv import load_dotenv
 
-load_dotenv()
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DOTENV_PATH = os.path.join(PROJECT_ROOT, ".env")
+# Always load the project file, independent of the process working directory.
+# Explicit .env values are authoritative for this application.
+load_dotenv(DOTENV_PATH, override=True)
 
 
 def _get_proxy() -> str:

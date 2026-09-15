@@ -55,7 +55,7 @@ def _now() -> str:
 def _live_target_ip() -> str:
     """Read TARGET_IP from .env for each web request; existing processes need no restart."""
     values = dotenv_values(ROOT / ".env")
-    return str(values.get("TARGET_IP") or os.getenv("TARGET_IP") or cfg.target_ip).strip()
+    return str(values.get("TARGET_IP") or cfg.target_ip).strip()
 
 
 def _json_safe(value: Any) -> Any:
