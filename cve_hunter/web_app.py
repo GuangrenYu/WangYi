@@ -29,6 +29,7 @@ from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 
 from cve_hunter.config import cfg
+from dotenv import dotenv_values
 
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -49,6 +50,12 @@ PHASE_LABELS = {
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _live_target_ip() -> str:
+    """Read TARGET_IP from .env for each web request; existing processes need no restart."""
+    values = dotenv_values(ROOT / ".env")
+    return str(values.get("TARGET_IP") or os.getenv("TARGET_IP") or cfg.target_ip).strip()
 
 
 def _json_safe(value: Any) -> Any:
@@ -111,7 +118,7 @@ class TaskManager:
             "uploaded_files": list(uploaded_files or []),
             "output_dir": output_dir,
             "selection": dict(selection or {}),
-            "target_ip": target_ip or cfg.target_ip, "local_only": local_only,
+            "target_ip": target_ip or _live_target_ip(), "local_only": local_only,
             "environment_discovery": environment_discovery and not local_only,
         }
         with self.lock:
@@ -314,7 +321,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "docker_default": False,
-        "target_ip": cfg.target_ip,
+        "target_ip": _live_target_ip(),
         "cli_docker_default": bool(cfg.auto_env_enabled),
         "tasks": len(manager.tasks),
     }
@@ -478,7 +485,7 @@ async def create_task(
     if mode not in {"full", "analysis", "environment", "poc"}:
         raise HTTPException(400, "mode 必须是 full、analysis、environment 或 poc")
     files = files or []
-    target_ip = target_ip.strip() or cfg.target_ip
+    target_ip = target_ip.strip() or _live_target_ip()
     if target_ip.startswith(("http://", "https://")):
         from urllib.parse import urlparse
         target_ip = urlparse(target_ip).hostname or target_ip
