@@ -16,6 +16,26 @@ from cve_hunter.agents import run_environment_agent
 
 
 class OfflineTests(unittest.TestCase):
+    def test_relative_windows_path_is_anchored_to_project(self):
+        with patch("cve_hunter.tools.nvd_local.cfg", replace(cfg, nvd_local_dir="poc_kb\\nvd")):
+            self.assertEqual(nvd_local._nvd_local_dir(), Path(nvd_local.__file__).resolve().parents[2] / "poc_kb" / "nvd")
+
+    def test_missing_year_and_corrupt_feed_are_not_reported_as_absent_cve(self):
+        with tempfile.TemporaryDirectory() as tmp, patch("cve_hunter.tools.nvd_local.cfg", replace(cfg, nvd_local_dir=tmp)):
+            missing = query_nvd("CVE-2021-44228", local_only=True)
+            self.assertEqual(missing["nvd_source"], "local_error")
+            self.assertIn("2021", missing["error"])
+            path = Path(tmp) / "nvdcve-2.0-2021.json"
+            path.write_text('{"CVE_Items": []}', encoding="utf-8")
+            invalid = query_nvd("CVE-2021-44228", local_only=True)
+            self.assertEqual(invalid["nvd_source"], "local_error")
+            self.assertIn("vulnerabilities", invalid["error"])
+            path.write_text('{"vulnerabilities": []}', encoding="utf-8")
+            self.assertEqual(query_nvd("CVE-2021-44228", local_only=True)["nvd_source"], "local_not_found")
+            path.write_text(json.dumps({"vulnerabilities": [{"cve": {"id": "CVE-2021-44228"}}]}), encoding="utf-8")
+            self.assertEqual(query_nvd("CVE-2021-44228", local_only=True)["nvd_source"], "local")
+            self.assertIn(2021, nvd_local.get_nvd_local_status()["years_available"])
+
     def test_local_nvd_preserves_version_cvss_and_weakness_without_api(self):
         item = {"id": "CVE-2025-12345", "descriptions": [{"lang": "en", "value": "Example vulnerable parser"}],
                 "metrics": {"cvssMetricV40": [{"cvssData": {"baseScore": 8.7, "baseSeverity": "HIGH", "vectorString": "CVSS:4.0/AV:N"}}]},

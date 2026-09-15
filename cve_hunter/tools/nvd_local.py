@@ -41,11 +41,15 @@ _YEAR_MAX = datetime.now().year
 _year_cache: dict[str, dict] = {}
 _cache_order: list[str] = []
 _cve_index_cache: dict[str, dict[str, dict]] = {}
+_feed_signatures: dict[str, tuple[int, int]] = {}
 _MAX_CACHE_SIZE = 2
 
 
 def _nvd_local_dir() -> Path:
-    return Path(cfg.nvd_local_dir)
+    # Migrated Windows relative paths must not become literal backslash names
+    # on Ubuntu. Resolve relative configuration against the application root.
+    path = Path(str(cfg.nvd_local_dir).replace("\\", "/")).expanduser()
+    return path if path.is_absolute() else Path(__file__).resolve().parents[2] / path
 
 
 def _feed_url(year: int) -> str:
@@ -174,6 +178,7 @@ def download_nvd_feeds(
     _year_cache.clear()
     _cache_order.clear()
     _cve_index_cache.clear()
+    _feed_signatures.clear()
 
     return result
 
@@ -208,26 +213,27 @@ def query_nvd_local(cve_id: str) -> dict | None:
     local_dir = _nvd_local_dir()
 
     # 1) 先查对应年份文件
-    year_file = local_dir / _YEAR_FILE.format(year=year)
-    if year_file.exists():
-        cve_data = _search_in_feed(cve_id, year_file)
-        if cve_data:
-            return _parse_cve_item(cve_id, cve_data)
-
-    # 2) 查 modified 包（跨年份的近期修改）
-    modified_file = local_dir / _MODIFIED_FILE
-    if modified_file.exists():
-        cve_data = _search_in_feed(cve_id, modified_file)
-        if cve_data:
-            return _parse_cve_item(cve_id, cve_data)
-
-    # 3) 查 recent 包
-    recent_file = local_dir / _RECENT_FILE
-    if recent_file.exists():
-        cve_data = _search_in_feed(cve_id, recent_file)
-        if cve_data:
-            return _parse_cve_item(cve_id, cve_data)
-
+    files = [local_dir / f"nvdcve-2.0-{label}{suffix}"
+             for label in ("modified", "recent", str(year))
+             for suffix in (".json.gz", ".json")]
+    files = [path for path in files if path.is_file()]
+    if not files:
+        raise FileNotFoundError(
+            f"NVD 目录 {local_dir} 中没有 {year} 年 Feed 或 modified/recent 包；"
+            f"请下载 {year} 年数据（CVE 年份与下载年份必须对应）"
+        )
+    errors = []
+    for path in files:
+        try:
+            cve_data = _search_in_feed(cve_id.strip(), path)
+            if cve_data:
+                result = _parse_cve_item(cve_id, cve_data)
+                result["metadata"]["feed_path"] = str(path)
+                return result
+        except Exception as exc:
+            errors.append(f"{path}: {exc}")
+    if errors:
+        raise ValueError("本地 Feed 读取失败：" + "; ".join(errors))
     return None
 
 
@@ -251,7 +257,8 @@ def _load_feed(filepath: Path) -> dict:
 
 
 def _read_gz_json(filepath: Path) -> dict:
-    with gzip.open(filepath, "rb") as f:
+    opener = gzip.open if filepath.suffix == ".gz" else open
+    with opener(filepath, "rb") as f:
         return json.loads(f.read())
 
 
@@ -259,11 +266,21 @@ def _search_in_feed(cve_id: str, filepath: Path) -> dict | None:
     """在单个 feed 文件中搜索 CVE。"""
     try:
         key = str(filepath)
+        stat = filepath.stat()
+        signature = (stat.st_mtime_ns, stat.st_size)
+        if _feed_signatures.get(key) != signature:
+            _year_cache.pop(key, None)
+            _cve_index_cache.pop(key, None)
+            if key in _cache_order:
+                _cache_order.remove(key)
+            _feed_signatures[key] = signature
         index = _cve_index_cache.get(key)
         if index is None:
             data = _load_feed(filepath)
             # Annual feeds contain tens of thousands of entries; indexing once
             # avoids rescanning the full JSON for every CVE in a batch.
+            if not isinstance(data, dict) or not isinstance(data.get("vulnerabilities"), list):
+                raise ValueError("不是 NVD JSON 2.0 格式（缺少 vulnerabilities 数组），请重新下载 2.0 Feed")
             index = {
                 str(item.get("cve", {}).get("id", "")).upper(): item.get("cve", {})
                 for item in data.get("vulnerabilities", [])
@@ -271,8 +288,8 @@ def _search_in_feed(cve_id: str, filepath: Path) -> dict | None:
             }
             _cve_index_cache[key] = index
         return index.get(cve_id.upper())
-    except Exception:
-        return None
+    except Exception as exc:
+        raise ValueError(f"无法解析 NVD Feed: {exc}") from exc
 
 
 def _parse_cve_item(cve_id: str, cve_item: dict) -> dict:
@@ -326,15 +343,15 @@ def get_nvd_local_status() -> dict:
     """获取本地 NVD 数据状态摘要。"""
     local_dir = _nvd_local_dir()
     if not local_dir.exists():
-        return {"exists": False, "years": [], "total_size_mb": 0}
+        return {"exists": False, "dir": str(local_dir), "years_available": [], "total_size_mb": 0}
 
     years = []
     total_size = 0
     for year in range(_YEAR_MIN, _YEAR_MAX + 1):
-        f = local_dir / _YEAR_FILE.format(year=year)
-        if f.exists():
+        feeds = [local_dir / f"nvdcve-2.0-{year}{suffix}" for suffix in (".json.gz", ".json")]
+        if any(f.is_file() for f in feeds):
             years.append(year)
-            total_size += f.stat().st_size
+            total_size += sum(f.stat().st_size for f in feeds if f.is_file())
 
     modified_file = local_dir / _MODIFIED_FILE
     recent_file = local_dir / _RECENT_FILE

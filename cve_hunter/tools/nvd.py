@@ -130,7 +130,8 @@ def query_nvd(cve_id: str, *, local_only: bool = False) -> dict:
             return {"error": f"本地 NVD 查询失败: {exc}", "nvd_source": "local_error"}
 
     if local_only:
-        return {"error": f"本地 NVD 信息源中未找到 {cve_id}", "nvd_source": "local_not_found"}
+        from cve_hunter.tools.nvd_local import _nvd_local_dir
+        return {"error": f"已读取本地 NVD（{_nvd_local_dir()}），数据中没有 {cve_id}；检查对应年份 Feed 是否完整且已更新", "nvd_source": "local_not_found"}
 
     # ── 回退到远程 NVD API ──
     result = _query_nvd_api(cve_id)
