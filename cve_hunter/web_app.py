@@ -54,7 +54,19 @@ def _now() -> str:
 
 def _live_target_ip() -> str:
     """Read TARGET_IP from .env for each web request; existing processes need no restart."""
-    values = dotenv_values(ROOT / ".env")
+    dotenv_path = ROOT / ".env"
+    # Read the last assignment explicitly; this also handles duplicate keys
+    # left behind by manual edits, where dotenv parsers can hide the source.
+    value = ""
+    try:
+        for line in dotenv_path.read_text(encoding="utf-8-sig").splitlines():
+            if line.strip().startswith("TARGET_IP="):
+                value = line.split("=", 1)[1].strip().strip("'\"")
+    except OSError:
+        pass
+    if value:
+        return value
+    values = dotenv_values(dotenv_path)
     return str(values.get("TARGET_IP") or cfg.target_ip).strip()
 
 
@@ -322,6 +334,7 @@ async def health() -> dict[str, Any]:
         "status": "ok",
         "docker_default": False,
         "target_ip": _live_target_ip(),
+        "dotenv_path": str(ROOT / ".env"),
         "cli_docker_default": bool(cfg.auto_env_enabled),
         "tasks": len(manager.tasks),
     }
