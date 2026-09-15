@@ -9,6 +9,7 @@ import json
 import re
 
 from cve_hunter.config import cfg
+from cve_hunter.runtime import is_local_only
 
 _llm_cache = {}
 
@@ -18,6 +19,8 @@ def _is_llm_available() -> bool:
 
 
 def get_llm(*, model: str | None = None, temperature: float = 0.2, max_tokens: int = 4096):
+    if is_local_only():
+        return None
     cache_key = (model or cfg.llm_model, temperature, max_tokens)
     if cache_key not in _llm_cache:
         if not _is_llm_available():

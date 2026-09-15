@@ -27,6 +27,7 @@ from langgraph.graph import StateGraph, END
 
 from cve_hunter.classifier import classify_http_vuln_from_info
 from cve_hunter.config import cfg
+from cve_hunter.runtime import effective_target_ip
 from cve_hunter.environment import build_environment_spec, write_environment_manifest
 from cve_hunter.state import CVEState
 from cve_hunter.llm import invoke_llm
@@ -156,12 +157,13 @@ def node_query_nvd(state: CVEState) -> dict:
     """查询 NVD 获取 CVE 详细信息。"""
     console.print(f"[bold cyan]▶ 查询 NVD[/] {state.cve_id}")
     try:
-        info = query_nvd(state.cve_id)
+        info = query_nvd(state.cve_id, local_only=state.local_only)
         if "error" in info:
             hint = classify_error(info["error"], source="nvd")
             return {
                 "error_messages": state.error_messages + [info["error"]],
                 "nvd_description": "",
+                "nvd_source": info.get("nvd_source", ""),
                 **make_status_update(state.status_code, hint.code, hint.message),
                 "current_phase": "vuln_type_check",
                 **_milestone_update(
@@ -175,10 +177,12 @@ def node_query_nvd(state: CVEState) -> dict:
         console.print(f"  [green]✓[/] CVSS={info['cvss_score']} refs={len(info['references'])}")
         return {
             "nvd_description": info["description"],
+            "nvd_source": info.get("nvd_source", ""),
             "nvd_references": info["references"],
             "affected_products": info["affected_products"],
             "cvss_score": info["cvss_score"],
             "cvss_severity": info["cvss_severity"],
+            "nvd_metadata": info.get("metadata", {}),
             "current_phase": "vuln_type_check",
             **_milestone_update(
                 state,
@@ -211,6 +215,26 @@ def node_query_nvd(state: CVEState) -> dict:
 def node_vuln_type_check(state: CVEState) -> dict:
     """AI 判断漏洞是否属于 HTTP/Web 类型。"""
     console.print("[bold cyan]▶ AI 漏洞类型判断[/]")
+
+    if state.local_only:
+        protocol = infer_protocol(
+            is_http_vuln=True,
+            description=state.nvd_description,
+        )
+        is_http = protocol == PROTOCOL_HTTP
+        return {
+            "is_http_vuln": is_http,
+            "vuln_type": "本地规则",
+            "protocol": protocol,
+            "current_phase": "environment_agent",
+            **_milestone_update(
+                state,
+                "http_classified",
+                "passed",
+                message="严格本地模式：使用本地规则分类",
+                data={"is_http_vuln": is_http, "vuln_type": "本地规则", "protocol": protocol},
+            ),
+        }
 
     if not state.nvd_description:
         console.print("  [yellow]⚠ 无 NVD 描述，默认为 HTTP 漏洞继续处理[/]")
@@ -482,7 +506,7 @@ def node_local_kb_search(state: CVEState) -> dict:
                 updates.update(
                     make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND))
                 )
-                updates["current_phase"] = "generate_report"
+                updates["current_phase"] = "poc_from_nvd" if state.local_only else "generate_report"
                 return updates
             console.print("  [yellow]⚠ 本地 KB 无可用 HTTP/SQL PoC，继续远程搜索[/]")
             updates["current_phase"] = "reference_analysis"
@@ -499,7 +523,7 @@ def node_local_kb_search(state: CVEState) -> dict:
         console.print("  [yellow]⚠ local-container 模式：无本地 PoC，跳过远程搜索[/]")
         return {
             "phases_tried": state.phases_tried + ["local_kb_search"],
-            "current_phase": "generate_report",
+            "current_phase": "poc_from_nvd" if state.local_only else "generate_report",
             **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
         }
 
@@ -507,6 +531,30 @@ def node_local_kb_search(state: CVEState) -> dict:
         "phases_tried": state.phases_tried + ["local_kb_search"],
         "current_phase": "reference_analysis",
     }
+
+
+def node_poc_from_nvd(state: CVEState) -> dict:
+    """Extract explicit requests from local intelligence; never invent an exploit."""
+    import re
+
+    requests = []
+    # Bound extraction to explicit code blocks to avoid treating prose as a body.
+    for block in re.findall(r"```(?:http|text|raw)?\s*\n(.*?)```", state.nvd_description, re.S | re.I):
+        requests.extend(extract_http_requests(block))
+    updates = {"phases_tried": state.phases_tried + ["poc_from_nvd"]}
+    if requests:
+        updates.update(_candidate_update(
+            state, _raw_http_candidates(requests, source="local_nvd",
+                evidence_url=f"local-nvd:{state.cve_id}", confidence=0.6,
+                reason="本地 NVD 描述中的明确 HTTP 请求，尚未验证"),
+            fallback_phase="generate_report",
+        ))
+    else:
+        updates.update({"current_phase": "generate_report", **make_status_update(
+            state.status_code, POC_NOT_FOUND,
+            "本地知识库无可用 PoC；NVD 描述、CVSS 和版本信息不足以构造明确请求，未联网补全",
+        )})
+    return updates
 
 
 def _search_uploaded_files(cve_id: str, paths: list[str]) -> dict:
@@ -975,7 +1023,7 @@ def node_verify_poc(state: CVEState) -> dict:
         }
 
     environment = state.attack_environment or {}
-    target = environment.get("target_host") or cfg.target_ip
+    target = environment.get("target_host") or effective_target_ip()
     console.print(f"  准备验证候选，目标 {target}...")
     max_requests = int(getattr(cfg, "max_requests_per_cve", 20) or 0)
     if state.local_container_mode:
@@ -1350,6 +1398,10 @@ def node_generate_report(state: CVEState) -> dict:
         "status_code": final_code,
         "message": final_msg,
         "nvd_description": state.nvd_description,
+        "nvd_source": state.nvd_source,
+        "nvd_metadata": state.nvd_metadata,
+        "local_only": state.local_only,
+        "target_ip": state.target_ip,
         "cvss_score": state.cvss_score,
         "cvss_severity": state.cvss_severity,
         "vuln_type": state.vuln_type,
@@ -1812,6 +1864,8 @@ def _extract_http_requests(text: str, cve_id: str) -> list[str]:
 
 def _local_container_skip_remote(state: CVEState) -> bool:
     """local-container 批测默认禁止远程搜索/外链抽取（可用配置打开）。"""
+    if state.local_only:
+        return True
     if not state.local_container_mode:
         return False
     return not bool(getattr(cfg, "local_container_allow_remote_search", False))
@@ -1835,6 +1889,8 @@ def _has_local_kb_candidates(state: CVEState) -> bool:
 
 def _next_phase_after_verify(state: CVEState) -> str:
     """验证失败后确定下一个阶段。"""
+    if state.local_only:
+        return "generate_report"
     # local-container：已有本地候选则不再远程发散；无本地候选时仅允许本地 nuclei
     if _local_container_skip_remote(state):
         if _has_local_kb_candidates(state):
@@ -1888,6 +1944,8 @@ def route_after_validate(state: CVEState) -> str:
 def route_after_type_check(state: CVEState) -> str:
     if getattr(state, "stop_after", "") == "analysis":
         return "generate_report"
+    if state.local_only:
+        return "environment_agent"
     # HTTP 与数据库可继续；其余非 HTTP 仅保留接口，直接归档。
     if state.is_http_vuln or getattr(state, "protocol", "") == PROTOCOL_DATABASE:
         return "environment_agent"
@@ -1905,7 +1963,11 @@ def route_after_environment(state: CVEState) -> str:
 
 def route_after_local_kb(state: CVEState) -> str:
     """本地 KB 搜索后路由：找到 PoC 则直接验证，否则继续常规流程。"""
+    if state.current_phase == "poc_from_nvd":
+        return "poc_from_nvd"
     if state.current_phase == "verify_poc":
+        if state.stop_after == "poc":
+            return "generate_report"
         return "verify_poc"
     if state.current_phase == "generate_report":
         return "generate_report"
@@ -1938,6 +2000,7 @@ def route_after_phase(state: CVEState) -> str:
         "reference_analysis": "reference_analysis",
         "trigger_agent": "trigger_agent",
         "poc_from_refs": "poc_from_refs",
+        "poc_from_nvd": "poc_from_nvd",
         "nuclei_search": "nuclei_search",
         "exploitdb_search": "exploitdb_search",
         "imfht_search": "imfht_search",
@@ -1968,6 +2031,8 @@ def build_graph() -> StateGraph:
     workflow.add_node("vuln_type_check", node_vuln_type_check)
     workflow.add_node("environment_agent", node_environment_agent)
     workflow.add_node("local_kb_search", node_local_kb_search)
+    workflow.add_node("poc_from_nvd", node_poc_from_nvd)
+    workflow.add_conditional_edges("poc_from_nvd", route_after_phase)
     workflow.add_node("reference_analysis", node_reference_analysis)
     workflow.add_node("trigger_agent", node_trigger_agent)
     workflow.add_node("poc_from_refs", node_poc_from_refs)

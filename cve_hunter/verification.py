@@ -19,6 +19,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 from cve_hunter.config import cfg
+from cve_hunter.runtime import effective_target_ip, explicit_target_ip, as_target_url
 from cve_hunter.ips_match import classify_ips_matches, summarize_ips_classification
 from cve_hunter.state import CVEState
 from cve_hunter.status_codes import (
@@ -393,16 +394,17 @@ def _with_executor_metadata(
 
 
 def _default_target_url() -> str:
-    if cfg.attack_env_target_url:
+    if cfg.attack_env_target_url and not explicit_target_ip():
         return cfg.attack_env_target_url
-    if cfg.target_ip.startswith(("http://", "https://")):
-        return cfg.target_ip
-    return f"http://{cfg.target_ip}"
+    target_ip = effective_target_ip()
+    if target_ip.startswith(("http://", "https://")):
+        return target_ip
+    return as_target_url(target_ip)
 
 
 def _target_host_from_url(url: str) -> str:
     parsed = urlparse(url if "://" in url else f"http://{url}")
-    return parsed.netloc or parsed.path or cfg.target_ip
+    return parsed.netloc or parsed.path or effective_target_ip()
 
 
 def _prepare_raw_http(raw_http: str, target_host: str) -> str:

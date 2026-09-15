@@ -133,7 +133,7 @@ class AgentTests(unittest.TestCase):
                 "      - \"18080:80\"\n",
                 encoding="utf-8",
             )
-            state = CVEState(cve_id="CVE-2024-0001")
+            state = CVEState(cve_id="CVE-2024-0001", environment_discovery=True)
             fake_cfg = SimpleNamespace(
                 vulhub_dir=tmp,
                 auto_env_enabled=False,
@@ -163,7 +163,7 @@ class AgentTests(unittest.TestCase):
                 "      - '18080:80'\n",
                 encoding="utf-8",
             )
-            state = CVEState(cve_id="CVE-2017-8291")
+            state = CVEState(cve_id="CVE-2017-8291", environment_discovery=True)
             fake_cfg = SimpleNamespace(
                 vulhub_dir=tmp,
                 auto_env_enabled=False,

@@ -279,6 +279,8 @@ def _parse_cve_item(cve_id: str, cve_item: dict) -> dict:
     """解析 CVE JSON 条目（与 API 返回格式一致）。"""
     descriptions = cve_item.get("descriptions", [])
     desc_en = next((d["value"] for d in descriptions if d.get("lang") == "en"), "")
+    if not desc_en and descriptions:
+        desc_en = descriptions[0].get("value", "")
 
     refs = normalize_reference_urls([r.get("url", "") for r in cve_item.get("references", [])])
 
@@ -293,12 +295,14 @@ def _parse_cve_item(cve_id: str, cve_item: dict) -> dict:
     metrics = cve_item.get("metrics", {})
     cvss_score = 0.0
     cvss_severity = ""
-    for vk in ("cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
+    cvss_vector = ""
+    for vk in ("cvssMetricV40", "cvssMetricV31", "cvssMetricV30", "cvssMetricV2"):
         metric_list = metrics.get(vk, [])
         if metric_list:
             cvss_data = metric_list[0].get("cvssData", {})
             cvss_score = cvss_data.get("baseScore", 0.0)
-            cvss_severity = cvss_data.get("baseSeverity", "")
+            cvss_severity = cvss_data.get("baseSeverity", metric_list[0].get("baseSeverity", ""))
+            cvss_vector = cvss_data.get("vectorString", "")
             break
 
     return {
@@ -308,6 +312,13 @@ def _parse_cve_item(cve_id: str, cve_item: dict) -> dict:
         "affected_products": products,
         "cvss_score": cvss_score,
         "cvss_severity": cvss_severity,
+        "metadata": {
+            "cvss_vector": cvss_vector,
+            "weaknesses": cve_item.get("weaknesses", []),
+            "configurations": cve_item.get("configurations", []),
+            "reference_details": cve_item.get("references", []),
+            "last_modified": cve_item.get("lastModified", ""),
+        },
     }
 
 

@@ -20,13 +20,18 @@ class CVEState:
     uploaded_files: list[str] = field(default_factory=list)
     # Per-run artifact root. Empty keeps the configured CLI output directory.
     output_dir: str = ""
+    target_ip: str = ""
+    local_only: bool = False
+    environment_discovery: bool = False
 
     # ── NVD 信息 ──
     nvd_description: str = ""
+    nvd_source: str = ""
     nvd_references: list[str] = field(default_factory=list)
     affected_products: list[str] = field(default_factory=list)
     cvss_score: float = 0.0
     cvss_severity: str = ""
+    nvd_metadata: dict[str, Any] = field(default_factory=dict)
 
     # ── AI 判断 ──
     is_http_vuln: bool = True

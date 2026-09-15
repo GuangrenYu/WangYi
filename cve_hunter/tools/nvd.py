@@ -111,7 +111,7 @@ def _request_nvd(cve_id: str, headers: dict[str, str]) -> httpx.Response:
     raise RuntimeError("No NVD HTTP route available")
 
 
-def query_nvd(cve_id: str) -> dict:
+def query_nvd(cve_id: str, *, local_only: bool = False) -> dict:
     """查询 NVD 获取 CVE 详细信息（优先本地数据，回退 API）。
 
     返回包含 description, references, affected_products, cvss 等字段的字典。
@@ -123,12 +123,19 @@ def query_nvd(cve_id: str) -> dict:
         local_result = query_nvd_local(cve_id)
         if local_result is not None:
             _print_local_hit(cve_id)
+            local_result.setdefault("nvd_source", "local")
             return local_result
-    except Exception:
-        pass
+    except Exception as exc:
+        if local_only:
+            return {"error": f"本地 NVD 查询失败: {exc}", "nvd_source": "local_error"}
+
+    if local_only:
+        return {"error": f"本地 NVD 信息源中未找到 {cve_id}", "nvd_source": "local_not_found"}
 
     # ── 回退到远程 NVD API ──
-    return _query_nvd_api(cve_id)
+    result = _query_nvd_api(cve_id)
+    result.setdefault("nvd_source", "nvd_api")
+    return result
 
 
 def _print_local_hit(cve_id: str) -> None:

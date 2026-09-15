@@ -39,6 +39,7 @@ import yaml
 import httpx
 
 from cve_hunter.config import cfg
+from cve_hunter.runtime import effective_target_ip, explicit_target_ip, as_target_url
 from cve_hunter.llm import invoke_llm
 from cve_hunter.state import CVEState
 
@@ -99,6 +100,14 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
     默认只规划。启用自动环境或本地容器模式后，按候选优先级尝试对应
     launcher，并在一个来源启动失败时回退到下一个来源。
     """
+    if state.local_only or not (state.environment_discovery or state.local_container_mode):
+        environment = _default_environment()
+        environment["setup_mode"] = "disabled"
+        return {
+            "environment_candidates": [], "attack_environment": environment, "errors": [],
+            "trace": {"agent": "EnvironmentAgent", "action": "use_existing_target",
+                      "status": "planned", "summary": "使用现有目标，跳过环境候选发现和启动", "data": {}},
+        }
     local_container_mode = state.local_container_mode
     bootstrap_errors: list[str] = []
     if local_container_mode:
@@ -155,9 +164,13 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
     elif not env_enabled:
         environment["setup_mode"] = "disabled"
 
+    if state.target_ip and not (env_enabled or local_container_mode):
+        environment.update(_default_environment())
+        environment["setup_mode"] = "disabled"
+
     llm_plan = {}
     llm_error = ""
-    if getattr(cfg, "agent_llm_enabled", False) and not (local_container_mode and not candidates):
+    if getattr(cfg, "agent_llm_enabled", False) and not state.local_only and not (local_container_mode and not candidates):
         try:
             llm_plan = _run_environment_agent_llm(state, candidates, environment)
             environment["llm_plan"] = llm_plan
@@ -194,7 +207,7 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
 def run_trigger_agent(state: CVEState) -> dict[str, Any]:
     """Extract a coarse trigger model and default validation hint."""
     llm_error = ""
-    if getattr(cfg, "agent_llm_enabled", False):
+    if getattr(cfg, "agent_llm_enabled", False) and not state.local_only:
         try:
             return _run_trigger_agent_llm(state)
         except Exception as exc:
@@ -298,7 +311,7 @@ def run_critic_agent(state: CVEState, candidate: dict[str, Any]) -> dict[str, An
         "timestamp": datetime.now().isoformat(),
     }
     llm_error = ""
-    if getattr(cfg, "agent_llm_enabled", False):
+    if getattr(cfg, "agent_llm_enabled", False) and not state.local_only:
         try:
             llm_review = _run_critic_agent_llm(state, enriched, review)
             enriched, review = _merge_llm_critic_review(enriched, review, llm_review)
@@ -2195,16 +2208,17 @@ def _default_environment() -> dict[str, Any]:
 
 
 def _default_target_url() -> str:
-    if cfg.attack_env_target_url:
+    if cfg.attack_env_target_url and not explicit_target_ip():
         return cfg.attack_env_target_url
-    if cfg.target_ip.startswith(("http://", "https://")):
-        return cfg.target_ip
-    return f"http://{cfg.target_ip}"
+    target_ip = effective_target_ip()
+    if target_ip.startswith(("http://", "https://")):
+        return target_ip
+    return as_target_url(target_ip)
 
 
 def _target_host_from_url(url: str) -> str:
     parsed = urlparse(url if "://" in url else f"http://{url}")
-    return parsed.netloc or parsed.path or cfg.target_ip
+    return parsed.netloc or parsed.path or effective_target_ip()
 
 
 def _infer_attack_objective(text: str) -> str:

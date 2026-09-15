@@ -14,6 +14,11 @@ import queue
 import re
 import threading
 import uuid
+import multiprocessing
+import signal
+import subprocess
+import time
+import ipaddress
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
@@ -65,6 +70,8 @@ class TaskManager:
         self.tasks: dict[str, dict[str, Any]] = {}
         self.streams: dict[str, queue.Queue] = {}
         self.lock = threading.RLock()
+        self.context = multiprocessing.get_context("spawn")
+        self.workers = {}
         self.executor = ThreadPoolExecutor(max_workers=16, thread_name_prefix="cve-web")
         TASK_DIR.mkdir(parents=True, exist_ok=True)
         self._load_history()
@@ -79,10 +86,10 @@ class TaskManager:
                 continue
             if not isinstance(task, dict) or not task.get("id"):
                 continue
-            if task.get("status") in {"queued", "running"}:
+            if task.get("status") in {"queued", "running", "stopping"}:
                 task["status"] = "interrupted"
                 for item in (task.get("items") or {}).values():
-                    if item.get("status") in {"queued", "running"}:
+                    if item.get("status") in {"queued", "running", "stopping"}:
                         item["status"] = "interrupted"
                         item["phase"] = "interrupted"
                         item["message"] = "服务重启时任务未完成"
@@ -90,7 +97,8 @@ class TaskManager:
 
     def create(self, cves: list[str], *, mode: str, concurrency: int, docker_enabled: bool,
                uploaded_files: list[str] | None = None, output_dir: str = "",
-               selection: dict[str, Any] | None = None, task_id: str | None = None) -> dict[str, Any]:
+               selection: dict[str, Any] | None = None, task_id: str | None = None,
+               target_ip: str = "", local_only: bool = False, environment_discovery: bool = False) -> dict[str, Any]:
         task_id = task_id or uuid.uuid4().hex[:12]
         items = {
             cve: {"cve_id": cve, "status": "queued", "phase": "queued", "phases_tried": [], "message": "排队中"}
@@ -103,6 +111,8 @@ class TaskManager:
             "uploaded_files": list(uploaded_files or []),
             "output_dir": output_dir,
             "selection": dict(selection or {}),
+            "target_ip": target_ip or cfg.target_ip, "local_only": local_only,
+            "environment_discovery": environment_discovery and not local_only,
         }
         with self.lock:
             self.tasks[task_id] = task
@@ -119,8 +129,107 @@ class TaskManager:
             return _json_safe(task)
 
     def _save(self, task_id: str) -> None:
-        task = self.get(task_id)
-        (TASK_DIR / f"{task_id}.json").write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
+        with self.lock:
+            task = self.get(task_id)
+            temporary = TASK_DIR / f"{task_id}.json.tmp"
+            temporary.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
+            temporary.replace(TASK_DIR / f"{task_id}.json")
+
+    def cancel(self, task_id: str, cve: str | None = None) -> dict:
+        with self.lock:
+            task = self.tasks[task_id]
+            if cve is not None and cve not in task["items"]:
+                raise KeyError(cve)
+            if cve is None and task["status"] in {"queued", "running", "stopping"}:
+                task["status"] = "stopping"
+            for key in ([cve] if cve else list(task["items"])):
+                item = task["items"][key]
+                if item["status"] == "queued":
+                    item.update(status="cancelled", phase="cancelled", message="已终止，未开始执行")
+                elif item["status"] in {"running", "stopping"}:
+                    item.update(status="stopping", message="正在终止并清理进程")
+                    worker = self.workers.get((task_id, key))
+                    if worker:
+                        worker[1].set()
+            task["completed"] = sum(i["status"] in {"success", "failed", "cancelled"} for i in task["items"].values())
+            self._save(task_id)
+            return self.get(task_id)
+
+    def _execute_one(self, task_id: str, cve: str, options: dict) -> None:
+        from cve_hunter.web_worker import execute
+        receive, send = self.context.Pipe(duplex=False)
+        cancelled = self.context.Event()
+        process = self.context.Process(target=execute, args=(send, cancelled, cve, options))
+        result = None
+        error = "执行进程退出但未返回结果"
+        with self.lock:
+            if self.tasks[task_id]["items"][cve]["status"] == "cancelled":
+                receive.close()
+                send.close()
+                return
+            self._update_item(task_id, cve, status="running", message="开始处理")
+            process.start()
+            self.workers[(task_id, cve)] = (process, cancelled)
+        send.close()
+        stop_started = None
+        try:
+            while True:
+                if cancelled.is_set():
+                    if stop_started is None:
+                        stop_started = time.monotonic()
+                        if os.name != "nt":
+                            process.terminate()
+                    if time.monotonic() - stop_started > 5 and process.is_alive():
+                        self._kill_worker(process)
+                try:
+                    available = receive.poll(0.1)
+                    event = receive.recv() if available else None
+                except (EOFError, OSError):
+                    break
+                if not available and not process.is_alive():
+                    break
+                if event is not None:
+                    if event["event"] == "result":
+                        result = event["data"]
+                    elif event["event"] == "error":
+                        error = event["data"]
+                    elif event["event"] == "progress" and not cancelled.is_set():
+                        data = event["data"]
+                        phase = data.get("phase", "running")
+                        self._update_item(task_id, cve, phase=phase, phase_label=PHASE_LABELS.get(phase, phase),
+                                          message=data.get("message", ""), phases_tried=data.get("phases_tried", []))
+            process.join(timeout=5)
+            if process.is_alive():
+                self._kill_worker(process)
+                process.join(timeout=5)
+            with self.lock:
+                if cancelled.is_set():
+                    self._update_item(task_id, cve, status="cancelled", phase="cancelled", phase_label="已终止",
+                                      message="进程已终止，已有文件保留；强制停止时请检查环境清理")
+                elif result is not None:
+                    self._update_item(task_id, cve, status="success" if result.get("status") == "SUCCESS" else "failed",
+                                      phase="done", phase_label="完成", result=result, message=result.get("message", ""))
+                else:
+                    self._update_item(task_id, cve, status="failed", phase="done", message=error)
+        finally:
+            if process.is_alive():
+                self._kill_worker(process)
+                process.join(timeout=5)
+            receive.close()
+            with self.lock:
+                self.workers.pop((task_id, cve), None)
+
+    @staticmethod
+    def _kill_worker(process) -> None:
+        if os.name == "nt":
+            subprocess.run(["taskkill", "/PID", str(process.pid), "/T", "/F"], capture_output=True, timeout=10)
+        else:
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+        if process.is_alive():
+            process.kill()
 
     def _emit(self, task_id: str, event: dict[str, Any]) -> None:
         event = {"at": _now(), **event}
@@ -128,9 +237,6 @@ class TaskManager:
             task = self.tasks.get(task_id)
             if task:
                 task["updated_at"] = event["at"]
-            stream = self.streams.get(task_id)
-        if stream:
-            stream.put(event)
 
     def _update_item(self, task_id: str, cve: str, **updates: Any) -> None:
         with self.lock:
@@ -142,7 +248,8 @@ class TaskManager:
     def _run_task(self, task_id: str) -> None:
         with self.lock:
             task = self.tasks[task_id]
-            task["status"] = "running"
+            if task["status"] != "stopping":
+                task["status"] = "running"
             mode = task["mode"]
             concurrency = task["concurrency"]
             docker_enabled = task["docker_enabled"]
@@ -152,67 +259,41 @@ class TaskManager:
         self._emit(task_id, {"event": "status", "status": "running", "message": "任务开始执行"})
 
         def run_one(cve: str) -> None:
-            from main import quiet_workflow_output, run_cve
-
-            stop_after = {"analysis": "analysis", "environment": "environment", "poc": "poc"}.get(mode, "")
-            self._update_item(task_id, cve, status="running", phase="validate_input", message="开始处理")
-
-            def progress(event: dict[str, Any]) -> None:
-                phase = str(event.get("phase") or event.get("node") or "running")
-                self._update_item(
-                    task_id, cve, phase=phase, phase_label=PHASE_LABELS.get(phase, phase),
-                    phases_tried=event.get("phases_tried") or [], message=event.get("message", ""),
-                )
-
             try:
-                with quiet_workflow_output():
-                    result = run_cve(
-                        cve, show_details=False, generate_report=True, on_progress=progress,
-                        stop_after=stop_after, docker_enabled=docker_enabled, uploaded_files=uploaded_files,
-                        output_dir=output_dir,
-                    )
-                result = _json_safe(result)
-                status = str(result.get("status") or "FAILURE")
-                self._update_item(
-                    task_id, cve, status="success" if status == "SUCCESS" else "failed",
-                    phase="done", phase_label="完成", message=result.get("message", ""), result=result,
-                )
-            except Exception as exc:  # keep one bad CVE from cancelling a batch
-                self._update_item(task_id, cve, status="failed", phase="done", phase_label="完成", message=str(exc), error=str(exc))
+                self._execute_one(task_id, cve, {
+                    "stop_after": {"analysis": "analysis", "environment": "environment", "poc": "poc"}.get(mode, ""),
+                    "docker_enabled": docker_enabled, "uploaded_files": uploaded_files,
+                    "output_dir": output_dir, "target_ip": task["target_ip"],
+                    "local_only": task["local_only"], "environment_discovery": task["environment_discovery"],
+                })
+            except Exception as exc:
+                with self.lock:
+                    item = task["items"][cve]
+                    status = "cancelled" if item["status"] in {"cancelled", "stopping"} else "failed"
+                    self._update_item(task_id, cve, status=status, message=str(exc))
             finally:
                 with self.lock:
-                    self.tasks[task_id]["completed"] = sum(
-                        item.get("status") in {"success", "failed"} for item in self.tasks[task_id]["items"].values()
-                    )
-                self._save(task_id)
-                self._emit(task_id, {"event": "progress", "completed": self.tasks[task_id]["completed"], "total": len(cves)})
+                    task["completed"] = sum(i["status"] in {"success", "failed", "cancelled"} for i in task["items"].values())
+                    self._save(task_id)
 
         with ThreadPoolExecutor(max_workers=concurrency, thread_name_prefix=f"cve-task-{task_id}") as pool:
             futures = [pool.submit(run_one, cve) for cve in cves]
             for future in futures:
                 future.result()
         with self.lock:
-            self.tasks[task_id]["status"] = "completed"
+            self.tasks[task_id]["status"] = "cancelled" if task["status"] == "stopping" else "completed"
             self.tasks[task_id]["completed"] = len(cves)
         self._save(task_id)
         self._emit(task_id, {"event": "status", "status": "completed", "message": "任务完成"})
 
     async def events(self, task_id: str):
-        with self.lock:
-            stream = self.streams.get(task_id)
-            exists = task_id in self.tasks
-        if not exists or stream is None:
-            return
-        yield {"event": "task", "task": self.get(task_id)}
+        # Each client receives its own snapshot; clients cannot steal queue events.
         while True:
-            try:
-                event = await asyncio.to_thread(stream.get, True, 15)
-            except queue.Empty:
-                yield {"event": "ping"}
-                continue
-            yield event
-            if event.get("event") == "status" and event.get("status") == "completed":
-                break
+            task = self.get(task_id)
+            yield {"event": "task", "task": task}
+            if task["status"] not in {"queued", "running", "stopping"}:
+                return
+            await asyncio.sleep(0.5)
 
 
 manager = TaskManager()
@@ -232,6 +313,7 @@ async def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "docker_default": False,
+        "target_ip": cfg.target_ip,
         "cli_docker_default": bool(cfg.auto_env_enabled),
         "tasks": len(manager.tasks),
     }
@@ -376,6 +458,9 @@ async def create_task(
     mode: str = Form("full"),
     concurrency: int = Form(2),
     docker_enabled: bool = Form(False),
+    target_ip: str = Form(""),
+    local_only: bool = Form(False),
+    environment_discovery: bool = Form(False),
     output_dir: str = Form(""),
     range_mode: str = Form("all"),
     range_count: int = Form(0),
@@ -387,6 +472,13 @@ async def create_task(
         raise HTTPException(400, "mode 必须是 full、analysis、environment 或 poc")
     if not files:
         raise HTTPException(400, "请上传至少一个文件")
+    target_ip = target_ip.strip() or cfg.target_ip
+    try:
+        ipaddress.ip_address(target_ip)
+    except ValueError:
+        raise HTTPException(400, "目标 IP 必须是有效的 IPv4 或 IPv6 地址")
+    environment_discovery = (environment_discovery or mode == "environment") and not local_only
+    docker_enabled = docker_enabled and environment_discovery and not local_only
     task_id = uuid.uuid4().hex[:12]
     upload_root = UPLOAD_DIR / task_id
     upload_root.mkdir(parents=True, exist_ok=True)
@@ -423,8 +515,8 @@ async def create_task(
         count = max(1, min(int(range_count or 1), original_total))
         cves = cves[-count:]
     elif range_mode == "slice":
-        start = max(1, int(range_start or 1))
-        end = max(start, int(range_end or start))
+        start = max(1, min(int(range_start or 1), original_total))
+        end = max(start, min(int(range_end or start), original_total))
         cves = cves[start - 1:end]
         if not cves:
             raise HTTPException(400, f"范围超出输入文件，共 {original_total} 条 CVE")
@@ -441,13 +533,14 @@ async def create_task(
     actual_output.mkdir(parents=True, exist_ok=True)
     selection = {
         "mode": range_mode,
-        "count": int(range_count or 0),
-        "start": int(range_start or 1),
-        "end": int(range_end or 0),
+        "count": len(cves),
+        "start": start if range_mode == "slice" else (original_total - len(cves) + 1 if range_mode == "tail" else 1),
+        "end": end if range_mode == "slice" else (original_total if range_mode in {"all", "tail"} else len(cves)),
         "input_total": original_total,
         "selected_total": len(cves),
     }
     task = manager.create(cves, mode=mode, concurrency=concurrency, docker_enabled=docker_enabled,
+                          target_ip=target_ip, local_only=local_only, environment_discovery=environment_discovery,
                           uploaded_files=[str(path) for path in upload_root.rglob("*") if path.is_file()],
                           output_dir=str(actual_output), selection=selection, task_id=task_id)
     task["upload_dir"] = str(upload_root)
@@ -468,6 +561,22 @@ async def get_task(task_id: str) -> dict[str, Any]:
         return manager.get(task_id)
     except KeyError:
         raise HTTPException(404, "任务不存在")
+
+
+@app.post("/api/tasks/{task_id}/cancel")
+async def cancel_task(task_id: str) -> dict:
+    try:
+        return manager.cancel(task_id)
+    except KeyError:
+        raise HTTPException(404, "任务不存在")
+
+
+@app.post("/api/tasks/{task_id}/items/{cve_id}/cancel")
+async def cancel_item(task_id: str, cve_id: str) -> dict:
+    try:
+        return manager.cancel(task_id, cve_id.upper())
+    except KeyError:
+        raise HTTPException(404, "任务或 CVE 不存在")
 
 
 @app.get("/api/tasks/{task_id}/events")

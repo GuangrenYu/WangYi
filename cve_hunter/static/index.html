@@ -47,6 +47,14 @@
           <label class="switch-field"><input id="docker-enabled" type="checkbox"><span class="switch"></span><span>启用 Docker 环境</span></label>
         </div>
         <div class="field-group run-options">
+          <label for="target-ip">目标 IP</label>
+          <input id="target-ip" class="text-input" type="text" placeholder="使用服务端默认目标">
+          <label class="check-field"><input id="local-only" type="checkbox"><span>仅使用本地知识库和 NVD</span></label>
+          <small class="field-hint">不联网搜索、不调用云端模型、不下载环境。验证仍会向目标发包；资料不足时报告无可用 PoC。</small>
+          <label class="check-field"><input id="environment-discovery" type="checkbox"><span>发现复现环境候选（可选）</span></label>
+          <small class="field-hint">默认直接使用目标 IP；开启后才查找复现环境。</small>
+        </div>
+        <div class="field-group run-options">
           <label for="output-dir">输出目录</label>
           <input id="output-dir" class="text-input" type="text" value="output/web_runs" placeholder="例如 output/web_runs 或 /data/cve-results">
           <small class="field-hint">每次任务会在此目录下建立独立任务目录。</small>
@@ -57,10 +65,13 @@
             <option value="all">全部 CVE</option>
             <option value="head">前 N 条</option>
             <option value="tail">后 N 条</option>
-            <option value="slice">第 M 到第 K 条（含首尾）</option>
+            <option value="slice">第 M 到第 N 条（含首尾）</option>
           </select>
-          <div id="range-count-row" class="range-row"><input id="range-count" type="range" min="1" max="100" value="10"><output id="range-count-value">10</output></div>
-          <div id="range-slice-row" class="slice-row" hidden><input id="range-start" class="text-input" type="number" min="1" value="1" placeholder="M"><span>到</span><input id="range-end" class="text-input" type="number" min="1" value="10" placeholder="K"></div>
+          <div id="range-count-row" class="range-row" hidden><input id="range-count" aria-label="条数滑块" type="range" min="1" max="1" value="1"><input id="range-count-value" aria-label="条数 N" class="text-input" type="number" min="1" max="1" value="1"></div>
+          <div id="range-slice-row" hidden>
+            <label class="range-row">M<input id="range-start-slider" aria-label="起始 M 滑块" type="range" min="1" max="1" value="1"><input id="range-start" aria-label="起始 M" class="text-input" type="number" min="1" max="1" value="1"></label>
+            <label class="range-row">N<input id="range-end-slider" aria-label="结束 N 滑块" type="range" min="1" max="1" value="1"><input id="range-end" aria-label="结束 N" class="text-input" type="number" min="1" max="1" value="1"></label>
+          </div>
           <small id="range-hint" class="field-hint">上传后按文件中的 CVE 顺序执行。</small>
         </div>
         <button class="primary" type="submit"><span>▶</span> 创建并运行任务</button>

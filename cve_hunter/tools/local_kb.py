@@ -12,6 +12,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import time
 from pathlib import Path
@@ -19,6 +20,7 @@ from pathlib import Path
 import httpx
 
 from cve_hunter.config import cfg
+from cve_hunter.runtime import is_local_only
 from cve_hunter.poc_parser import extract_http_requests
 from cve_hunter.tools.db_spec import extract_database_spec_from_paths
 
@@ -64,7 +66,7 @@ def search_local_kb(cve_id: str) -> dict:
     custom_file = base / "custom" / year / filename
     if custom_file.exists():
         result = _parse_custom_kb(custom_file.read_text(encoding="utf-8"), cve_id)
-        if result.get("raw_http"):
+        if result.get("raw_http") or result.get("yaml_content"):
             result["found"] = True
             result["source"] = "local_kb_custom"
             result["kb_path"] = str(custom_file)
@@ -85,7 +87,7 @@ def search_local_kb(cve_id: str) -> dict:
     if trickest_file.exists():
         content = trickest_file.read_text(encoding="utf-8")
         parsed = _parse_trickest_md(content, cve_id)
-        if parsed.get("github_repos") and getattr(cfg, "local_kb_github_fetch", False):
+        if parsed.get("github_repos") and getattr(cfg, "local_kb_github_fetch", False) and not is_local_only():
             # 尝试从关联 GitHub 仓库获取 PoC
             poc = _fetch_poc_from_github_repos(parsed["github_repos"], cve_id)
             if poc and (poc.get("raw_http") or poc.get("yaml_content")):
@@ -127,7 +129,7 @@ def search_local_kb(cve_id: str) -> dict:
 
 def _parse_custom_kb(content: str, cve_id: str) -> dict:
     """解析 custom/ 目录下的 PoC 文件，提取 HTTP 请求。"""
-    result: dict = {"raw_http": "", "yaml_content": ""}
+    result: dict = {"raw_http": "", "yaml_content": "", "validation_hint": None}
 
     # 提取 ```http ... ``` 代码块
     m = re.search(r"```(?:http)?\s*\n((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+[\s\S]*?)```", content)
@@ -138,6 +140,16 @@ def _parse_custom_kb(content: str, cve_id: str) -> dict:
     m = re.search(r"```(?:yaml|yml)?\s*\n(id:\s*[\s\S]*?)```", content)
     if m:
         result["yaml_content"] = m.group(1).strip()
+
+    # 提取 ```json ... ``` 代码块中的 validation_hint
+    m = re.search(r'```(?:json)?\s*\n(\{[\s\S]*?"validation_hint"[\s\S]*?\})\s*\n```', content)
+    if m:
+        try:
+            hint_data = json.loads(m.group(1))
+            if isinstance(hint_data.get("validation_hint"), dict):
+                result["validation_hint"] = hint_data["validation_hint"]
+        except json.JSONDecodeError:
+            pass
 
     return result
 

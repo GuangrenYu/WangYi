@@ -22,6 +22,7 @@ from urllib.parse import urlparse
 import httpx
 
 from cve_hunter.config import cfg
+from cve_hunter.runtime import effective_target_ip, as_target_url
 from cve_hunter.safety import is_local_lab_host
 
 
@@ -131,7 +132,7 @@ def _send_via_http2pcap_nuclei(yaml_content: str, target_url: str, cve_id: str =
             "/api/nuclei-poc",
             json={
                 "yaml_content": yaml_content,
-                "target_url": target_url or f"http://{cfg.target_ip}",
+                "target_url": target_url or as_target_url(effective_target_ip()),
                 "check_ips": True,
                 "cve_id": cve_id,
             },

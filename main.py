@@ -131,11 +131,15 @@ def run_cve(
     docker_enabled: bool | None = None,
     uploaded_files: list[str] | None = None,
     output_dir: str = "",
+    target_ip: str = "",
+    local_only: bool = False,
+    environment_discovery: bool = False,
 ) -> CVEState:
     """执行一次 CVE 复现流程。"""
     from cve_hunter.agents import reclaim_owned_compose_projects
     from cve_hunter.graph import build_graph
     from cve_hunter.state import CVEState
+    from cve_hunter.runtime import run_options
 
     if show_details:
         console.print(Panel(
@@ -157,41 +161,45 @@ def run_cve(
         selected_phases=list(selected_phases or []),
         uploaded_files=list(uploaded_files or []),
         output_dir=str(output_dir or ""),
+        target_ip=str(target_ip or ""),
+        local_only=bool(local_only),
+        environment_discovery=bool(environment_discovery),
     )
 
     final_state = None
-    try:
-        if on_progress:
-            on_progress({"event": "started", "cve_id": cve_id, "phase": "validate_input", "message": "任务已开始"})
-        if selected_phases:
-            initial_state.selected_phases = list(selected_phases)
-        # stream_mode=updates exposes each LangGraph node boundary so the web UI
-        # can show real progress without changing the existing workflow nodes.
-        streamed_state = dict(initial_state.__dict__)
-        for update in graph.stream(initial_state, stream_mode="updates"):
-            node_name = next(iter(update), "")
-            node_update = update.get(node_name) or {}
-            if isinstance(node_update, dict):
-                streamed_state = {**streamed_state, **node_update}
-                phase = str(node_update.get("current_phase") or node_name)
-                if on_progress:
-                    on_progress({
-                        "event": "phase",
-                        "cve_id": cve_id,
-                        "phase": phase,
-                        "node": node_name,
-                        "message": f"完成 {node_name}",
-                        "phases_tried": list(node_update.get("phases_tried") or []),
-                    })
-        final_state = streamed_state
-    finally:
-        # Safety net for residual containers when report teardown was skipped
-        # or intermediate cleanup failed after compose up.
-        reclaim_results = reclaim_owned_compose_projects()
-        failed_reclaims = [item for item in reclaim_results if not item.get("success")]
-        if failed_reclaims and show_details:
-            names = ", ".join(item.get("project_name", "?") for item in failed_reclaims)
-            console.print(f"[yellow]⚠ 容器强制回收未完全成功: {names}[/yellow]")
+    with run_options(target_ip=target_ip, local_only=local_only):
+        try:
+            if on_progress:
+                on_progress({"event": "started", "cve_id": cve_id, "phase": "validate_input", "message": "任务已开始"})
+            if selected_phases:
+                initial_state.selected_phases = list(selected_phases)
+            # stream_mode=updates exposes each LangGraph node boundary so the web UI
+            # can show real progress without changing the existing workflow nodes.
+            streamed_state = dict(initial_state.__dict__)
+            for update in graph.stream(initial_state, stream_mode="updates"):
+                node_name = next(iter(update), "")
+                node_update = update.get(node_name) or {}
+                if isinstance(node_update, dict):
+                    streamed_state = {**streamed_state, **node_update}
+                    phase = str(node_update.get("current_phase") or node_name)
+                    if on_progress:
+                        on_progress({
+                            "event": "phase",
+                            "cve_id": cve_id,
+                            "phase": phase,
+                            "node": node_name,
+                            "message": f"完成 {node_name}",
+                            "phases_tried": list(node_update.get("phases_tried") or []),
+                        })
+            final_state = streamed_state
+        finally:
+            # Safety net for residual containers when report teardown was skipped
+            # or intermediate cleanup failed after compose up.
+            reclaim_results = reclaim_owned_compose_projects()
+            failed_reclaims = [item for item in reclaim_results if not item.get("success")]
+            if failed_reclaims and show_details:
+                names = ", ".join(item.get("project_name", "?") for item in failed_reclaims)
+                console.print(f"[yellow]⚠ 容器强制回收未完全成功: {names}[/yellow]")
 
     if final_state is None:
         raise RuntimeError(f"工作流未返回结果: {cve_id}")
