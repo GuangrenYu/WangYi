@@ -405,6 +405,7 @@ def node_local_kb_search(state: CVEState) -> dict:
 
             updates: dict = {
                 "phases_tried": state.phases_tried + ["local_kb_search"],
+                "local_knowledge_context": str(result.get("content") or result.get("raw_http") or result.get("yaml_content") or "")[:12000],
             }
 
             if result.get("raw_http"):
@@ -534,7 +535,7 @@ def node_local_kb_search(state: CVEState) -> dict:
 
 
 def node_poc_from_nvd(state: CVEState) -> dict:
-    """Extract explicit requests from local intelligence; never invent an exploit."""
+    """Generate a candidate from local intelligence without fetching references."""
     import re
 
     requests = []
@@ -542,6 +543,17 @@ def node_poc_from_nvd(state: CVEState) -> dict:
     for block in re.findall(r"```(?:http|text|raw)?\s*\n(.*?)```", state.nvd_description, re.S | re.I):
         requests.extend(extract_http_requests(block))
     updates = {"phases_tried": state.phases_tried + ["poc_from_nvd"]}
+    prompt = f"""Generate a conservative PoC candidate for {state.cve_id} using ONLY this local CVE data.
+Do not use references or invent endpoints. If evidence is insufficient, return {{\"candidates\":[]}}.
+Return JSON with candidates containing raw_http only when grounded in supplied data.
+LOCAL DATA:\n{state.nvd_description}\n{state.local_knowledge_context}\n{json.dumps(state.nvd_metadata, ensure_ascii=False)[:6000]}\nProducts: {', '.join(state.affected_products[:10])}"""
+    try:
+        generated = _llm_poc_candidates(invoke_llm(prompt), source="local_llm",
+            evidence_url=f"local-nvd:{state.cve_id}", confidence=0.55,
+            reason="仅基于本地 NVD/cvelist 上下文生成")
+        requests.extend(c.get("raw_http", "") for c in generated if c.get("raw_http"))
+    except Exception as exc:
+        updates["error_messages"] = state.error_messages + [f"本地上下文 PoC 生成失败: {exc}"]
     if requests:
         updates.update(_candidate_update(
             state, _raw_http_candidates(requests, source="local_nvd",

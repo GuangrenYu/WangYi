@@ -32,6 +32,7 @@ class CVEState:
     cvss_score: float = 0.0
     cvss_severity: str = ""
     nvd_metadata: dict[str, Any] = field(default_factory=dict)
+    local_knowledge_context: str = ""
 
     # ── AI 判断 ──
     is_http_vuln: bool = True
