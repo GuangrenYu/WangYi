@@ -35,6 +35,7 @@ _RECENT_FILE = "nvdcve-2.0-recent.json.gz"
 
 # 有效年份范围
 _YEAR_MIN = 1999
+_NVD_FEED_MIN_YEAR = 2002
 _YEAR_MAX = datetime.now().year
 
 # 已加载的年度数据缓存（最多缓存 2 个年份）
@@ -129,6 +130,11 @@ def download_nvd_feeds(
 
     downloads: list[tuple[str, str, str]] = []
     for y in years:
+        if y < _NVD_FEED_MIN_YEAR:
+            result["errors"].append({"label": str(y), "error": "NVD 官方年度 Feed 从 2002 年开始，1999-2001 没有对应下载文件（404）"})
+            if progress_callback:
+                progress_callback(str(y), "error", "官方 Feed 不存在（NVD 年度数据从 2002 年开始）")
+            continue
         downloads.append((_YEAR_FILE.format(year=y), _feed_url(y), f"{y}"))
     if include_modified:
         downloads.append((_MODIFIED_FILE, f"{NVD_FEED_BASE}/{_MODIFIED_FILE}", "modified"))

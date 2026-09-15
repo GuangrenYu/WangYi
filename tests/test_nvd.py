@@ -33,6 +33,16 @@ def test_web_accepts_full_range_without_downloading():
             assert client.post("/api/knowledge-bases/nvd/update", data={"years": "all"}).status_code == 409
 
 
+def test_pre_2002_feeds_are_reported_as_officially_unavailable():
+    from cve_hunter.tools.nvd_local import download_nvd_feeds
+    with patch("cve_hunter.tools.nvd_local._nvd_local_dir") as local_dir, patch("cve_hunter.tools.nvd_local.httpx.Client") as client:
+        local_dir.return_value.mkdir = lambda **kwargs: None
+        result = download_nvd_feeds(years=[1999, 2000, 2001, 2002], include_modified=False)
+        labels = {item["label"] for item in result["errors"]}
+        assert {"1999", "2000", "2001"}.issubset(labels)
+        client.assert_called_once()
+
+
 def test_nvd_request_falls_back_to_direct_when_proxy_is_unreachable():
     request = httpx.Request("GET", "https://services.nvd.nist.gov/")
     response = httpx.Response(200, request=request, json={"vulnerabilities": []})
