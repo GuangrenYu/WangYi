@@ -131,6 +131,7 @@ class TaskManager:
     def _save(self, task_id: str) -> None:
         with self.lock:
             task = self.get(task_id)
+            TASK_DIR.mkdir(parents=True, exist_ok=True)
             temporary = TASK_DIR / f"{task_id}.json.tmp"
             temporary.write_text(json.dumps(task, ensure_ascii=False, indent=2), encoding="utf-8")
             temporary.replace(TASK_DIR / f"{task_id}.json")
