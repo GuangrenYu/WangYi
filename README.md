@@ -34,6 +34,15 @@ NVD References → Nuclei → Exploit-DB → imfht → 联网搜索+AI构造
 
 任一阶段验证成功（IPS 命中）即结束；全部失败则标记为复现失败。
 
+本地查询支持 `poc_kb/poc0911/<CVE-ID>/poc.http`，主文件不可用时读取
+`repro/trigger/poc.http`。该批次质量较低，排在 custom、PCAP 和本地靶场之后，
+仅作为参考请求，不继承历史 `result.json` 的成功状态或验证条件。参考请求发包后，
+无论命中与否均继续获取新 PoC：联网模式继续参考分析等搜索流程，离线模式使用本地
+CVE 情报生成新候选；仍遵守请求预算、候选去重和仅生成 PoC 的运行限制。
+
+远程 PCAP 下载归档保留发包服务的原文件名（优先下载响应的 `Content-Disposition`，
+其次远程文件路径、下载 URL），不再统一改名为 `capture.pcap`；无法取得有效原名时才回退。
+
 ## 快速开始
 
 ### 1. 环境准备

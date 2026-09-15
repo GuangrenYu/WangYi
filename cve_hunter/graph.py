@@ -416,8 +416,8 @@ def node_local_kb_search(state: CVEState) -> dict:
                         [result["raw_http"]],
                         source=source_label,
                         evidence_url=result.get("kb_path", ""),
-                        confidence=0.95 if source_label == "local_kb_custom" else 0.75,
-                        reason="本地知识库命中",
+                        confidence=0.25 if result.get("reference_only") else (0.95 if source_label == "local_kb_custom" else 0.75),
+                        reason="历史低质量 POC，仅供参考，完成后继续新 POC" if result.get("reference_only") else "本地知识库命中",
                         validation_hint=result.get("validation_hint"),
                     ),
                     fallback_phase="reference_analysis",
@@ -547,6 +547,7 @@ def node_poc_from_nvd(state: CVEState) -> dict:
 Use explicit paths, parameters, payloads, or reproduction steps present in the data. Do not use references or invent endpoints.
 If no executable evidence exists, return {{\"candidates\":[]}}.
 Return JSON with candidates containing raw_http only when grounded in supplied data.
+Historical poc0911 requests are low-quality references, not proof. Cross-check them against the CVE data and produce a new grounded candidate; do not repeat previously tried requests.
 LOCAL DATA:\n{state.nvd_description}\n{state.local_knowledge_context}\n{json.dumps(state.nvd_metadata, ensure_ascii=False)[:6000]}\nProducts: {', '.join(state.affected_products[:10])}"""
     try:
         generated = _llm_poc_candidates(invoke_llm(prompt), source="local_llm",
@@ -1136,6 +1137,18 @@ def node_verify_poc(state: CVEState) -> dict:
         "success_level": oracle["success_level"],
         "milestones": milestones,
     }
+
+    if candidate.get("source") == "local_kb_poc0911":
+        updates["attempt_history"] = _append_attempt_history(
+            state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
+            oracle_result=oracle, candidate=candidate,
+        )
+        updates.update({
+            "status": "FAILURE", "status_code": POC_NOT_FOUND,
+            "message": "poc0911 参考请求已完成，继续获取新 POC；旧请求结果仅保留为参考证据",
+        })
+        updates.update(_next_attempt_or_phase_update(state))
+        return updates
 
     if ips_matched:
         console.print(
@@ -1911,6 +1924,9 @@ def _has_local_kb_candidates(state: CVEState) -> bool:
 
 def _next_phase_after_verify(state: CVEState) -> str:
     """验证失败后确定下一个阶段。"""
+    if any(c.get("source") == "local_kb_poc0911" for c in state.poc_candidates):
+        if _local_container_skip_remote(state) and "poc_from_nvd" not in state.phases_tried:
+            return "poc_from_nvd"
     if state.local_only and not state.allow_reference_links:
         return "generate_report"
     if state.local_only and state.allow_reference_links:

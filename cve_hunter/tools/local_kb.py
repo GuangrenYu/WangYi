@@ -82,6 +82,11 @@ def search_local_kb(cve_id: str) -> dict:
     if vulhub_result.get("raw_http") or vulhub_result.get("execution_spec"):
         return vulhub_result
 
+    # 历史批次只作低可信参考，不导入 result.json 中的成功状态或 oracle。
+    batch_result = _search_poc0911(cve_id)
+    if batch_result.get("found"):
+        return batch_result
+
     # 4) trickest-cve/ —— 外部 PoC 目录
     trickest_file = base / "trickest-cve" / year / filename
     if trickest_file.exists():
@@ -123,6 +128,25 @@ def search_local_kb(cve_id: str) -> dict:
         }
 
     return {"found": False, "source": "local_kb"}
+
+
+def _search_poc0911(cve_id: str) -> dict:
+    if not re.fullmatch(r"CVE-\d{4}-\d+", cve_id, re.I):
+        return {"found": False}
+    directory = _kb_base() / "poc0911" / cve_id.upper()
+    for path in (directory / "poc.http", directory / "repro" / "trigger" / "poc.http"):
+        try:
+            raw_http = _first_http_request(path.read_text(encoding="utf-8-sig"))
+        except (OSError, UnicodeError):
+            continue
+        if raw_http:
+            return {
+                "found": True, "source": "local_kb_poc0911",
+                "kb_path": str(path), "raw_http": raw_http,
+                "reference_only": True,
+                "content": "poc0911 历史低质量 POC，仅供参考，不代表有效复现；必须继续构造新 POC。\n" + raw_http,
+            }
+    return {"found": False}
 
 
 # ── 解析 ──

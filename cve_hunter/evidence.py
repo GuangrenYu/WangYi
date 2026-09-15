@@ -12,8 +12,10 @@ from __future__ import annotations
 import json
 import shutil
 import httpx
+from email.message import Message
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qs, unquote, urlparse
 
 from cve_hunter.status_codes import (
     AI_REPRODUCTION_FAILED,
@@ -421,6 +423,10 @@ def write_repro_bundle(
                 with httpx.stream("GET", download_url, timeout=httpx.Timeout(90, connect=15),
                                   follow_redirects=True, trust_env=False) as response:
                     response.raise_for_status()
+                    destination = output_root / _remote_pcap_name(
+                        response.headers.get("content-disposition", ""), pcap_file_path, download_url,
+                    )
+                    pending = destination.with_name(destination.name + ".part")
                     with pending.open("wb") as handle:
                         for chunk in response.iter_bytes():
                             handle.write(chunk)
@@ -459,3 +465,23 @@ def write_repro_bundle(
         "success_tier": tier,
         "failure_class": fclass,
     }
+
+
+def _remote_pcap_name(disposition: str, remote_path: str, download_url: str) -> str:
+    """Keep the sender's original basename while excluding remote directories."""
+    message = Message()
+    message["Content-Disposition"] = disposition
+    url = urlparse(download_url)
+    query = parse_qs(url.query)
+    names = [message.get_filename(), remote_path, *query.get("filename", []),
+             *query.get("file", []), unquote(url.path)]
+    for value in names:
+        name = str(value or "").replace("\\", "/").rsplit("/", 1)[-1]
+        if (name.lower().endswith((".pcap", ".pcapng"))
+                and not any(ord(c) < 32 or c in '<>:"|?*' for c in name)
+                and name.split(".", 1)[0].upper() not in {
+                    "CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)),
+                    *(f"LPT{i}" for i in range(1, 10)),
+                }):
+            return name
+    return "capture.pcap"

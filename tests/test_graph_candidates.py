@@ -28,6 +28,35 @@ def _raw(path: str) -> str:
 
 
 class GraphCandidateTests(unittest.TestCase):
+    def test_poc0911_continues_after_both_hit_and_miss(self):
+        for local_only, container in [(False, False), (True, False), (False, True)]:
+            for matched in [False, True]:
+                with self.subTest(local_only=local_only, container=container, matched=matched):
+                    state = CVEState(cve_id="CVE-2024-0001", local_only=local_only,
+                                     local_container_mode=container, phases_tried=["local_kb_search"])
+                    state = replace(state, **_candidate_update(state, _raw_http_candidates(
+                        [_raw("/old")], source="local_kb_poc0911")))
+                    result = {"success": True, "status_code": 200, "body": "", "ips_matches":
+                              [{"cve": state.cve_id}] if matched else []}
+                    with (patch("cve_hunter.graph.execute_candidate", return_value=result),
+                          patch("cve_hunter.graph.run_critic_agent", return_value={
+                              "candidate": state.poc_candidates[0], "review": {"accepted": True},
+                              "trace": {"agent": "CriticAgent", "action": "review", "status": "passed", "summary": "test"}}),
+                          patch("cve_hunter.graph.cfg", SimpleNamespace(local_container_allow_remote_search=False))):
+                        update = node_verify_poc(state)
+                    self.assertEqual(update["current_phase"], "poc_from_nvd" if local_only or container else "reference_analysis")
+                    self.assertEqual(update["status"], "FAILURE")
+                    self.assertEqual(len(update["attempt_history"]), 1)
+                    self.assertEqual(update["attempt_history"][0]["ips_matched"], matched)
+                    if local_only:
+                        state = replace(state, **update)
+                        with patch("cve_hunter.graph.invoke_llm", return_value='```http\n' + _raw("/new") + '```'):
+                            generated = node_poc_from_nvd(state)
+                        self.assertEqual(generated["current_phase"], "verify_poc")
+                        self.assertIn("/new", generated["poc_raw_http"])
+                        state = replace(state, **generated)
+                        self.assertEqual(_next_phase_after_verify(state), "generate_report")
+
     def test_local_reference_failure_stops_without_remote_search(self):
         state = CVEState(local_only=True, allow_reference_links=True,
                          phases_tried=["poc_from_nvd", "reference_analysis"],

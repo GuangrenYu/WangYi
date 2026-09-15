@@ -13,6 +13,7 @@ from cve_hunter.evidence import write_repro_bundle
 ])
 def test_remote_capture_download(tmp_path, status, content, success):
     response = httpx.Response(status, content=content,
+        headers={"Content-Disposition": 'attachment; filename="CVE-2025-0001_20260915_120000.pcap"'},
         request=httpx.Request("GET", "http://192.0.2.1/api/file?filename=capture.pcap"))
     # The response is a context manager in the real streaming call.
     from contextlib import contextmanager
@@ -29,9 +30,24 @@ def test_remote_capture_download(tmp_path, status, content, success):
             pcap_file_path="data/pcap/remote-only.pcap",
             executor_result={"pcap_download_url": str(response.request.url)})
     assert (tmp_path / "poc.http").is_file()
-    assert (tmp_path / "capture.pcap").exists() == success
-    assert not (tmp_path / "capture.pcap.part").exists()
+    destination = tmp_path / "CVE-2025-0001_20260915_120000.pcap"
+    assert destination.exists() == success
+    assert not list(tmp_path.glob("*.part"))
     assert bool(result["errors"]) != success
     assert result["complete"] == success
     if success:
-        assert (tmp_path / "capture.pcap").read_bytes() == content
+        assert destination.read_bytes() == content
+        assert result["artifacts"]["pcap"] == str(destination)
+
+
+@pytest.mark.parametrize("header,path,url,expected", [
+    ("", r"C:\captures\original_123.pcap", "http://example.test/download", "original_123.pcap"),
+    ("", "", "http://example.test/download?filename=original_456.pcap", "original_456.pcap"),
+    ("", "", "http://example.test/files/original.pcapng", "original.pcapng"),
+    ('attachment; filename="../../original.pcap"', "", "", "original.pcap"),
+    ("attachment; filename*=UTF-8''CVE_%E6%B5%8B%E8%AF%95.pcap", "", "", "CVE_测试.pcap"),
+    ('attachment; filename="bad:stream.pcap"', "", "", "capture.pcap"),
+])
+def test_remote_filename(header, path, url, expected):
+    from cve_hunter.evidence import _remote_pcap_name
+    assert _remote_pcap_name(header, path, url) == expected
