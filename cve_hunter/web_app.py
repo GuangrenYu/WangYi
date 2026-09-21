@@ -229,8 +229,17 @@ class TaskManager:
                     self._update_item(task_id, cve, status="cancelled", phase="cancelled", phase_label="已终止",
                                       message="进程已终止，已有文件保留；强制停止时请检查环境清理")
                 elif result is not None:
+                    # 只保留精简摘要，避免把完整 result.json 塞进任务快照导致内存/序列化爆炸。
                     self._update_item(task_id, cve, status="success" if result.get("status") == "SUCCESS" else "failed",
-                                      phase="done", phase_label="完成", result=result, message=result.get("message", ""))
+                                      phase="done", phase_label="完成",
+                                      result_summary={
+                                          "status": result.get("status", ""),
+                                          "status_code": result.get("status_code", ""),
+                                          "success_tier": result.get("success_tier", ""),
+                                          "poc_candidates": len(result.get("poc_candidates") or []),
+                                          "ips_matched": bool(result.get("ips_matched")),
+                                      },
+                                      message=result.get("message", ""))
                 else:
                     self._update_item(task_id, cve, status="failed", phase="done", message=error)
         finally:

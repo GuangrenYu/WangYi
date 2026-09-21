@@ -3,11 +3,45 @@ from pathlib import Path
 from unittest.mock import patch
 
 import main
-from cve_hunter.graph import node_environment_agent, route_after_environment
+from cve_hunter.graph import (
+    node_environment_agent,
+    node_local_kb_search,
+    route_after_environment,
+    route_after_type_check,
+)
 from cve_hunter.state import CVEState
 
 
 class LocalContainerModeTests(unittest.TestCase):
+    def test_http_path_skips_environment_agent(self):
+        state = CVEState(is_http_vuln=True, protocol="http", local_container_mode=False)
+        self.assertEqual(route_after_type_check(state), "local_kb_search")
+
+    def test_local_container_still_enters_environment_agent(self):
+        state = CVEState(is_http_vuln=True, protocol="http", local_container_mode=True)
+        self.assertEqual(route_after_type_check(state), "environment_agent")
+
+    def test_local_kb_seeds_default_target_when_environment_skipped(self):
+        state = CVEState(cve_id="CVE-2024-1111", is_http_vuln=True)
+        with (
+            patch("cve_hunter.graph.search_local_kb", return_value={"found": False}),
+            patch("cve_hunter.graph.console.print"),
+            patch(
+                "cve_hunter.graph.default_attack_environment",
+                return_value={
+                    "source": "default_target",
+                    "target_url": "http://10.55.1.21",
+                    "target_host": "10.55.1.21",
+                    "setup_mode": "disabled",
+                },
+            ),
+        ):
+            update = node_local_kb_search(state)
+
+        self.assertEqual(update["attack_environment"]["target_host"], "10.55.1.21")
+        self.assertEqual(update["milestones"]["environment_planned"]["status"], "skipped")
+        self.assertEqual(update["agent_trace"][-1]["action"], "skip_for_http_path")
+
     def test_environment_route_stops_after_local_match_failure(self):
         state = CVEState(current_phase="generate_report", local_container_mode=True)
         self.assertEqual(route_after_environment(state), "generate_report")

@@ -10,9 +10,49 @@ import yaml
 from cve_hunter.config import cfg
 
 
-# ── Nuclei 官方 PoC 库 (GitHub raw) ──
+# ── Nuclei 官方 PoC 库 ──
+# 国内 raw.githubusercontent.com 常被墙，优先走 jsdelivr CDN 镜像（可达、快、无频率限制），
+# 失败再回退到 raw 和 GitHub API。
 
+_NUCLEI_CDN = "https://cdn.jsdelivr.net/gh/projectdiscovery/nuclei-templates@main/http/cves"
 _NUCLEI_RAW = "https://raw.githubusercontent.com/projectdiscovery/nuclei-templates/main/http/cves"
+_NUCLEI_API = "https://api.github.com/repos/projectdiscovery/nuclei-templates/contents/http/cves"
+
+
+def _fetch_nuclei_content(path: str) -> str:
+    """依次尝试 CDN / raw / GitHub API 获取 nuclei 模板原文，返回文本或空串。"""
+    endpoints = [
+        f"{_NUCLEI_CDN}/{path}",
+        f"{_NUCLEI_RAW}/{path}",
+    ]
+    for url in endpoints:
+        try:
+            resp = httpx.get(url, timeout=cfg.request_timeout, follow_redirects=True, proxy=cfg.httpx_proxy)
+            if resp.status_code == 200 and resp.text.strip():
+                return resp.text
+            if resp.status_code == 404:
+                return ""
+        except Exception:
+            continue
+
+    # GitHub API 兜底：返回 base64 内容
+    try:
+        resp = httpx.get(
+            f"{_NUCLEI_API}/{path}",
+            headers={"Accept": "application/vnd.github.v3+json"},
+            timeout=cfg.request_timeout,
+            follow_redirects=True,
+            proxy=cfg.httpx_proxy,
+        )
+        if resp.status_code == 200:
+            import base64
+            data = resp.json()
+            content = data.get("content", "")
+            if content:
+                return base64.b64decode(content).decode("utf-8", "ignore")
+    except Exception:
+        pass
+    return ""
 
 
 def search_nuclei(cve_id: str) -> dict:
@@ -25,31 +65,95 @@ def search_nuclei(cve_id: str) -> dict:
         return {"found": False, "error": "CVE 编号格式错误"}
 
     year = m.group(1)
-    cve_lower = cve_id.upper()
-    url = f"{_NUCLEI_RAW}/{year}/{cve_lower}.yaml"
+    cve_upper = cve_id.upper()
+    path = f"{year}/{cve_upper}.yaml"
+
+    content = _fetch_nuclei_content(path)
+    if not content:
+        return {"found": False, "source": "nuclei"}
+
+    try:
+        parsed = yaml.safe_load(content)
+        info = parsed.get("info", {}) if isinstance(parsed, dict) else {}
+    except Exception:
+        info = {}
+
+    return {
+        "found": True,
+        "source": "nuclei",
+        "yaml_content": content,
+        "url": f"{_NUCLEI_CDN}/{path}",
+        "name": info.get("name", ""),
+        "severity": info.get("severity", ""),
+    }
+
+
+# ── PoC-in-GitHub 聚合库 ──
+
+_POC_IN_GITHUB = "https://cdn.jsdelivr.net/gh/nomi-sec/PoC-in-GitHub@master"
+
+
+def search_poc_in_github(cve_id: str) -> dict:
+    """在 PoC-in-GitHub 聚合库中搜索 CVE 对应的 PoC 仓库链接。
+
+    返回命中仓库的 full_name / html_url / 描述，供后续抓取 PoC 内容。
+    """
+    m = re.match(r"CVE-(\d{4})-(\d+)", cve_id, re.IGNORECASE)
+    if not m:
+        return {"found": False, "error": "CVE 编号格式错误"}
+
+    year = m.group(1)
+    cve_upper = cve_id.upper()
+    url = f"{_POC_IN_GITHUB}/{year}/{cve_upper}.json"
 
     try:
         resp = httpx.get(url, timeout=cfg.request_timeout, follow_redirects=True, proxy=cfg.httpx_proxy)
-        if resp.status_code == 200:
-            content = resp.text
-            try:
-                parsed = yaml.safe_load(content)
-                info = parsed.get("info", {})
-            except Exception:
-                info = {}
-            return {
-                "found": True,
-                "source": "nuclei",
-                "yaml_content": content,
-                "url": url,
-                "name": info.get("name", ""),
-                "severity": info.get("severity", ""),
-            }
-        if resp.status_code not in (404,):
-            return {"found": False, "source": "nuclei", "error": f"nuclei 请求失败: HTTP {resp.status_code}"}
-        return {"found": False, "source": "nuclei"}
+        if resp.status_code != 200:
+            return {"found": False, "source": "poc-in-github"}
+        data = resp.json()
+        if not isinstance(data, list):
+            return {"found": False, "source": "poc-in-github"}
+        repos = []
+        for item in data[:10]:
+            if not isinstance(item, dict):
+                continue
+            full_name = item.get("full_name") or ""
+            html_url = item.get("html_url") or ""
+            if not full_name:
+                continue
+            repos.append({
+                "full_name": full_name,
+                "html_url": html_url,
+                "name": item.get("name", ""),
+                "description": (item.get("description") or "")[:200],
+            })
+        if repos:
+            return {"found": True, "source": "poc-in-github", "repos": repos}
+        return {"found": False, "source": "poc-in-github"}
     except Exception as e:
-        return {"found": False, "source": "nuclei", "error": str(e)}
+        return {"found": False, "source": "poc-in-github", "error": str(e)}
+
+
+_POC_REPO_FILES = [
+    "README.md", "README.txt", "README.rst",
+    "poc.py", "exploit.py", "exp.py", "poc.rb", "exploit.rb",
+    "poc.sh", "exploit.sh", "poc.txt", "exploit.txt",
+    "poc.http", "exploit.http", "request.http",
+]
+
+
+def fetch_github_repo_poc(repo_full_name: str) -> str:
+    """从单个 GitHub 仓库抓取可能含 PoC 的文件文本（走 jsdelivr CDN）。"""
+    for branch in ("main", "master"):
+        for filename in _POC_REPO_FILES:
+            url = f"https://cdn.jsdelivr.net/gh/{repo_full_name}@{branch}/{filename}"
+            try:
+                resp = httpx.get(url, timeout=cfg.request_timeout, follow_redirects=True, proxy=cfg.httpx_proxy)
+                if resp.status_code == 200 and len(resp.text) > 50:
+                    return resp.text
+            except Exception:
+                continue
+    return ""
 
 
 # ── Exploit-DB ──

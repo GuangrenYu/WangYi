@@ -96,11 +96,15 @@ def search_local_kb(cve_id: str) -> dict:
             # 尝试从关联 GitHub 仓库获取 PoC
             poc = _fetch_poc_from_github_repos(parsed["github_repos"], cve_id)
             if poc and (poc.get("raw_http") or poc.get("yaml_content")):
+                raw_http_list = poc.get("raw_http_list") or (
+                    [poc["raw_http"]] if poc.get("raw_http") else []
+                )
                 return {
                     "found": True,
                     "source": "local_kb_trickest",
                     "kb_path": str(trickest_file),
                     "raw_http": poc.get("raw_http", ""),
+                    "raw_http_list": raw_http_list,
                     "yaml_content": poc.get("yaml_content", ""),
                     "github_repos": parsed["github_repos"],
                     "references": parsed.get("references", []),
@@ -136,15 +140,16 @@ def _search_poc0911(cve_id: str) -> dict:
     directory = _kb_base() / "poc0911" / cve_id.upper()
     for path in (directory / "poc.http", directory / "repro" / "trigger" / "poc.http"):
         try:
-            raw_http = _first_http_request(path.read_text(encoding="utf-8-sig"))
+            requests = _all_http_requests(path.read_text(encoding="utf-8-sig"))
         except (OSError, UnicodeError):
             continue
-        if raw_http:
+        if requests:
             return {
                 "found": True, "source": "local_kb_poc0911",
-                "kb_path": str(path), "raw_http": raw_http,
+                "kb_path": str(path), "raw_http": requests[0],
+                "raw_http_list": requests,
                 "reference_only": True,
-                "content": "poc0911 历史低质量 POC，仅供参考，不代表有效复现；必须继续构造新 POC。\n" + raw_http,
+                "content": "poc0911 历史低质量 POC，仅供参考，不代表有效复现；必须继续构造新 POC。\n" + "\n".join(requests),
             }
     return {"found": False}
 
@@ -153,12 +158,13 @@ def _search_poc0911(cve_id: str) -> dict:
 
 def _parse_custom_kb(content: str, cve_id: str) -> dict:
     """解析 custom/ 目录下的 PoC 文件，提取 HTTP 请求。"""
-    result: dict = {"raw_http": "", "yaml_content": "", "validation_hint": None}
+    result: dict = {"raw_http": "", "raw_http_list": [], "yaml_content": "", "validation_hint": None}
 
-    # 提取 ```http ... ``` 代码块
-    m = re.search(r"```(?:http)?\s*\n((?:GET|POST|PUT|DELETE|PATCH|HEAD|OPTIONS)\s+\S+[\s\S]*?)```", content)
-    if m:
-        result["raw_http"] = _normalize_raw_http_host(m.group(1).strip())
+    # 提取所有 ```http ... ``` 代码块中的 HTTP 请求
+    requests = _all_http_requests(content)
+    if requests:
+        result["raw_http"] = requests[0]
+        result["raw_http_list"] = requests
 
     # 提取 ```yaml ... ``` 代码块
     m = re.search(r"```(?:yaml|yml)?\s*\n(id:\s*[\s\S]*?)```", content)
@@ -182,13 +188,14 @@ def _search_vulhub_readme(cve_id: str) -> dict:
     """从已接入本地环境源的 README 提取 Raw HTTP 或数据库 execution_spec。"""
     readmes = _vulhub_readmes_for_cve(cve_id)
     for readme in readmes:
-        raw_http = _first_http_request(readme.read_text(encoding="utf-8", errors="ignore"))
-        if raw_http:
+        requests = _all_http_requests(readme.read_text(encoding="utf-8", errors="ignore"))
+        if requests:
             return {
                 "found": True,
                 "source": "local_kb_vulhub",
                 "kb_path": str(readme),
-                "raw_http": raw_http,
+                "raw_http": requests[0],
+                "raw_http_list": requests,
                 "yaml_content": "",
                 "references": [],
                 "content": "",
@@ -258,18 +265,21 @@ def _build_vulhub_readme_index() -> dict[str, list[Path]]:
 def _search_pcap_kb(cve_id: str) -> dict:
     """从 data/cve/pcaps 中精确命中 CVE 文件名并提取 Raw HTTP PoC。"""
     matches = _pcap_files_for_cve(cve_id)
+    requests: list[str] = []
     for pcap_path in matches:
-        raw_http = _extract_raw_http_from_pcap(pcap_path)
-        if raw_http:
-            return {
-                "found": True,
-                "source": "local_kb_pcap",
-                "kb_path": str(pcap_path),
-                "raw_http": raw_http,
-                "yaml_content": "",
-                "references": [],
-                "content": "",
-            }
+        requests.extend(_extract_raw_http_from_pcap(pcap_path))
+    requests = list(dict.fromkeys(requests))
+    if requests:
+        return {
+            "found": True,
+            "source": "local_kb_pcap",
+            "kb_path": str(matches[0]),
+            "raw_http": requests[0],
+            "raw_http_list": requests,
+            "yaml_content": "",
+            "references": [],
+            "content": "",
+        }
     return {"found": False, "source": "local_kb_pcap"}
 
 
@@ -298,14 +308,15 @@ def _build_pcap_index() -> dict[str, list[Path]]:
     return _pcap_index
 
 
-def _extract_raw_http_from_pcap(path: Path) -> str:
-    """流式读取 PCAP，提取第一个 HTTP 请求载荷。"""
+def _extract_raw_http_from_pcap(path: Path) -> list[str]:
+    """流式读取 PCAP，提取所有 HTTP 请求载荷（去重）。"""
     try:
         from scapy.all import Raw
         from scapy.utils import PcapReader
     except Exception:
-        return ""
+        return []
 
+    requests: list[str] = []
     try:
         with PcapReader(str(path)) as reader:
             for packet in reader:
@@ -313,11 +324,11 @@ def _extract_raw_http_from_pcap(path: Path) -> str:
                     continue
                 payload = bytes(packet[Raw].load)
                 request = _extract_http_request_from_bytes(payload)
-                if request:
-                    return request
+                if request and request not in requests:
+                    requests.append(request)
     except Exception:
-        return ""
-    return ""
+        pass
+    return requests
 
 
 def _extract_http_request_from_bytes(payload: bytes) -> str:
@@ -358,9 +369,9 @@ def _content_length(headers: str) -> int:
         return 0
 
 
-def _first_http_request(text: str) -> str:
-    requests = extract_http_requests(text)
-    return _normalize_raw_http_host(requests[0]) if requests else ""
+def _all_http_requests(text: str) -> list[str]:
+    """提取文本中所有 Raw HTTP 请求，并统一绑定到运行时 target_host。"""
+    return [_normalize_raw_http_host(request) for request in extract_http_requests(text)]
 
 
 def _normalize_raw_http_host(raw_http: str) -> str:
@@ -459,7 +470,11 @@ def _fetch_poc_from_github_repos(repos: list[dict], cve_id: str) -> dict[str, st
                 if resp.status_code == 200 and len(resp.text) > 100:
                     pocs = _extract_http_requests(resp.text, cve_id)
                     if pocs:
-                        return {"raw_http": _normalize_raw_http_host(pocs[0]), "yaml_content": ""}
+                        return {
+                            "raw_http": _normalize_raw_http_host(pocs[0]),
+                            "raw_http_list": [_normalize_raw_http_host(p) for p in pocs],
+                            "yaml_content": "",
+                        }
                     if not yaml_candidate:
                         yaml_candidate = _extract_nuclei_yaml(resp.text, cve_id)
             except Exception:
@@ -605,6 +620,7 @@ def save_to_local_kb(
     poc_raw_http: str = "",
     poc_nuclei_yaml: str = "",
     metadata: dict | None = None,
+    poc_raw_http_list: list[str] | None = None,
 ) -> str | None:
     """将验证成功的 PoC 保存到 custom/ 本地知识库。
 
@@ -613,6 +629,7 @@ def save_to_local_kb(
         poc_raw_http: 原始 HTTP 请求 PoC
         poc_nuclei_yaml: Nuclei YAML 模板
         metadata: 额外元数据 (cvss_score, description, references 等)
+        poc_raw_http_list: 多个 HTTP PoC 候选（回写全部，供后续检索复用）
 
     Returns:
         保存的文件路径，失败返回 None
@@ -626,7 +643,7 @@ def save_to_local_kb(
     custom_dir = _kb_base() / "custom" / year
     custom_dir.mkdir(parents=True, exist_ok=True)
 
-    md = _build_custom_md(cve_id, poc_raw_http, poc_nuclei_yaml, metadata)
+    md = _build_custom_md(cve_id, poc_raw_http, poc_nuclei_yaml, metadata, poc_raw_http_list)
     filepath = custom_dir / filename
     filepath.write_text(md, encoding="utf-8")
     return str(filepath)
@@ -637,6 +654,7 @@ def _build_custom_md(
     poc_raw_http: str,
     poc_nuclei_yaml: str,
     metadata: dict,
+    poc_raw_http_list: list[str] | None = None,
 ) -> str:
     """构建 custom/ PoC 的 markdown 内容。"""
     lines = [
@@ -652,8 +670,15 @@ def _build_custom_md(
         "",
     ]
 
-    if poc_raw_http:
-        lines.extend(["## HTTP PoC", "", "```http", poc_raw_http, "```", ""])
+    http_pocs: list[str] = []
+    if poc_raw_http_list:
+        http_pocs = [poc for poc in poc_raw_http_list if poc and poc.strip()]
+    if poc_raw_http and poc_raw_http.strip() not in {poc.strip() for poc in http_pocs}:
+        http_pocs.append(poc_raw_http.strip())
+
+    for index, poc in enumerate(http_pocs, start=1):
+        heading = "## HTTP PoC" if len(http_pocs) == 1 else f"## HTTP PoC {index}"
+        lines.extend([heading, "", "```http", poc.strip(), "```", ""])
 
     if poc_nuclei_yaml:
         lines.extend(["## Nuclei YAML", "", "```yaml", poc_nuclei_yaml, "```", ""])

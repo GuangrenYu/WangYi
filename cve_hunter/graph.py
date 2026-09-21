@@ -18,7 +18,9 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from copy import deepcopy
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 from functools import lru_cache
@@ -33,6 +35,7 @@ from cve_hunter.state import CVEState
 from cve_hunter.llm import invoke_llm
 from cve_hunter.agents import (
     append_agent_trace,
+    default_attack_environment,
     run_critic_agent,
     run_environment_agent,
     run_trigger_agent,
@@ -45,11 +48,16 @@ from cve_hunter.prompts.templates import (
 )
 from cve_hunter.tools.nvd import query_nvd
 from cve_hunter.tools.web_extract import extract_url_content, extract_url_content_tavily
-from cve_hunter.tools.poc_sources import search_nuclei, search_exploitdb, search_imfht
+from cve_hunter.tools.ref_cache import (
+    load_reference_cache,
+    merge_reference_contents,
+    save_reference_cache,
+)
+from cve_hunter.tools.poc_sources import search_nuclei, search_exploitdb, search_imfht, search_poc_in_github, fetch_github_repo_poc
 from cve_hunter.tools.local_kb import search_local_kb, save_to_local_kb
 from cve_hunter.tools.web_search import search_web
 from cve_hunter.verification import evaluate_success, execute_candidate
-from cve_hunter.tools.http_sender import finalize_capture
+from cve_hunter.tools.http_sender import finalize_capture, refetch_ips_cve_matches
 from cve_hunter.evidence import (
     FAILURE_CLASS_NONE,
     build_version_evidence,
@@ -212,6 +220,18 @@ def node_query_nvd(state: CVEState) -> dict:
         }
 
 
+def _next_phase_after_classification(state: CVEState) -> str:
+    """HTTP 主路径跳过 EnvironmentAgent；仅 local-container 需要搭环境。"""
+    if state.local_container_mode:
+        return "environment_agent"
+    return "local_kb_search"
+
+
+def _is_runnable_protocol(protocol: str, is_http_vuln: bool = False) -> bool:
+    """Continue pipeline when inferred protocol is http/database, even if LLM said non-HTTP."""
+    return bool(is_http_vuln) or protocol in {PROTOCOL_HTTP, PROTOCOL_DATABASE}
+
+
 def node_vuln_type_check(state: CVEState) -> dict:
     """AI 判断漏洞是否属于 HTTP/Web 类型。"""
     console.print("[bold cyan]▶ AI 漏洞类型判断[/]")
@@ -226,7 +246,7 @@ def node_vuln_type_check(state: CVEState) -> dict:
             "is_http_vuln": is_http,
             "vuln_type": "本地规则",
             "protocol": protocol,
-            "current_phase": "environment_agent",
+            "current_phase": _next_phase_after_classification(state),
             **_milestone_update(
                 state,
                 "http_classified",
@@ -242,7 +262,7 @@ def node_vuln_type_check(state: CVEState) -> dict:
             "is_http_vuln": True,
             "vuln_type": "未知",
             "protocol": PROTOCOL_HTTP,
-            "current_phase": "environment_agent",
+            "current_phase": _next_phase_after_classification(state),
             **_milestone_update(
                 state,
                 "http_classified",
@@ -265,30 +285,34 @@ def node_vuln_type_check(state: CVEState) -> dict:
         vuln_type=result.vuln_type,
         description=state.nvd_description,
     )
+    # LLM 可能判非 HTTP，但 infer_protocol 已识别为 http/database 时仍继续。
+    runnable = _is_runnable_protocol(protocol, result.is_http_vuln)
+    effective_is_http = bool(result.is_http_vuln) or protocol == PROTOCOL_HTTP
     if result.error:
         console.print(f"  [yellow]⚠ {result.error}[/]")
         updates = {
-            "is_http_vuln": result.is_http_vuln,
+            "is_http_vuln": effective_is_http,
             "vuln_type": result.vuln_type,
             "protocol": protocol,
-            "current_phase": "reference_analysis" if result.is_http_vuln or protocol == PROTOCOL_DATABASE else "generate_report",
+            "current_phase": _next_phase_after_classification(state) if runnable else "generate_report",
             "error_messages": state.error_messages + [result.error],
         }
-        if not result.is_http_vuln and protocol != PROTOCOL_DATABASE:
+        if not runnable:
             updates.update(make_status_update(state.status_code, PROTOCOL_UNSUPPORTED, status_description(PROTOCOL_UNSUPPORTED)))
-        console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type} protocol={protocol}")
+            updates["current_phase"] = "generate_report"
+        console.print(f"  [green]✓[/] is_http={effective_is_http} type={result.vuln_type} protocol={protocol}")
         updates["milestones"] = _mark_milestone_map(
             state.milestones,
             "http_classified",
             "failed" if "AI 判断" in result.error else "passed",
             message=result.error,
-            data={"is_http_vuln": result.is_http_vuln, "vuln_type": result.vuln_type, "protocol": protocol},
+            data={"is_http_vuln": effective_is_http, "vuln_type": result.vuln_type, "protocol": protocol},
         )
         return updates
-    console.print(f"  [green]✓[/] is_http={result.is_http_vuln} type={result.vuln_type} protocol={protocol}")
-    phase = "environment_agent"
+    console.print(f"  [green]✓[/] is_http={effective_is_http} type={result.vuln_type} protocol={protocol}")
+    phase = _next_phase_after_classification(state) if runnable else "generate_report"
     updates = {
-        "is_http_vuln": result.is_http_vuln,
+        "is_http_vuln": effective_is_http,
         "vuln_type": result.vuln_type,
         "protocol": protocol,
         "current_phase": phase,
@@ -296,10 +320,10 @@ def node_vuln_type_check(state: CVEState) -> dict:
             state,
             "http_classified",
             "passed",
-            data={"is_http_vuln": result.is_http_vuln, "vuln_type": result.vuln_type, "protocol": protocol},
+            data={"is_http_vuln": effective_is_http, "vuln_type": result.vuln_type, "protocol": protocol},
         ),
     }
-    if not result.is_http_vuln and protocol != PROTOCOL_DATABASE:
+    if not runnable:
         updates.update(make_status_update(state.status_code, PROTOCOL_UNSUPPORTED, status_description(PROTOCOL_UNSUPPORTED)))
         updates["current_phase"] = "generate_report"
     return updates
@@ -392,9 +416,56 @@ def node_environment_agent(state: CVEState) -> dict:
     return updates
 
 
+def _seed_skipped_environment(state: CVEState) -> dict:
+    """正常 HTTP 路径跳过 EnvironmentAgent 时，填入 TARGET_IP 默认目标。"""
+    if state.attack_environment or state.local_container_mode:
+        return {}
+    env = default_attack_environment(setup_mode="disabled")
+    milestones = _mark_milestone_map(
+        state.milestones,
+        "environment_planned",
+        "skipped",
+        message="正常 HTTP 路径跳过 EnvironmentAgent，使用 TARGET_IP",
+        data={"target_url": env.get("target_url", ""), "setup_mode": "disabled"},
+    )
+    milestones = _mark_milestone_map(
+        milestones,
+        "environment_ready",
+        "skipped",
+        message="未启动本地容器环境",
+        data={"setup_mode": "disabled"},
+    )
+    return {
+        "attack_environment": env,
+        "environment_candidates": [],
+        "milestones": milestones,
+        "agent_trace": append_agent_trace(
+            state,
+            agent="EnvironmentAgent",
+            action="skip_for_http_path",
+            status="skipped",
+            summary="正常 HTTP 路径不调用 EnvironmentAgent，使用 TARGET_IP 默认目标",
+            data={"target_url": env.get("target_url", "")},
+        ),
+    }
+
+
 def node_local_kb_search(state: CVEState) -> dict:
     """在本地知识库中搜索 PoC（最高优先级，优先于远程源）。"""
     console.print("[bold cyan]▶ 搜索本地知识库[/]")
+    seeded = _seed_skipped_environment(state)
+    if seeded:
+        state = replace(
+            state,
+            attack_environment=seeded.get("attack_environment", state.attack_environment),
+            environment_candidates=seeded.get("environment_candidates", state.environment_candidates),
+            milestones=seeded.get("milestones", state.milestones),
+            agent_trace=seeded.get("agent_trace", state.agent_trace),
+        )
+
+    def _finish(updates: dict) -> dict:
+        return {**seeded, **updates} if seeded else updates
+
     try:
         result = _search_uploaded_files(state.cve_id, state.uploaded_files)
         if not result.get("found"):
@@ -408,12 +479,15 @@ def node_local_kb_search(state: CVEState) -> dict:
                 "local_knowledge_context": str(result.get("content") or result.get("raw_http") or result.get("yaml_content") or "")[:12000],
             }
 
-            if result.get("raw_http"):
-                console.print("  [green]✓ 提取到 HTTP PoC[/]")
+            raw_http_list = result.get("raw_http_list") or (
+                [result["raw_http"]] if result.get("raw_http") else []
+            )
+            if raw_http_list:
+                console.print(f"  [green]✓ 提取到 {len(raw_http_list)} 个 HTTP PoC[/]")
                 updates.update(_candidate_update(
                     state,
                     _raw_http_candidates(
-                        [result["raw_http"]],
+                        raw_http_list,
                         source=source_label,
                         evidence_url=result.get("kb_path", ""),
                         confidence=0.25 if result.get("reference_only") else (0.95 if source_label == "local_kb_custom" else 0.75),
@@ -422,7 +496,7 @@ def node_local_kb_search(state: CVEState) -> dict:
                     ),
                     fallback_phase="reference_analysis",
                 ))
-                return updates
+                return _finish(updates)
 
             if result.get("execution_spec"):
                 console.print("  [green]✓ 提取到数据库 execution_spec[/]")
@@ -485,7 +559,7 @@ def node_local_kb_search(state: CVEState) -> dict:
                     [candidate],
                     fallback_phase="reference_analysis",
                 ))
-                return updates
+                return _finish(updates)
 
             if result.get("yaml_content"):
                 updates.update(_candidate_update(
@@ -499,7 +573,7 @@ def node_local_kb_search(state: CVEState) -> dict:
                     )],
                     fallback_phase="reference_analysis",
                 ))
-                return updates
+                return _finish(updates)
 
             # trickest-cve 命中但未提取到 HTTP/SQL PoC
             if _local_container_skip_remote(state):
@@ -508,10 +582,10 @@ def node_local_kb_search(state: CVEState) -> dict:
                     make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND))
                 )
                 updates["current_phase"] = "poc_from_nvd" if state.local_only else "generate_report"
-                return updates
+                return _finish(updates)
             console.print("  [yellow]⚠ 本地 KB 无可用 HTTP/SQL PoC，继续远程搜索[/]")
             updates["current_phase"] = "poc_from_nvd" if state.local_only else "reference_analysis"
-            return updates
+            return _finish(updates)
 
         if result.get("error"):
             console.print(f"  [yellow]⚠ {result.get('error')}[/]")
@@ -522,16 +596,16 @@ def node_local_kb_search(state: CVEState) -> dict:
 
     if _local_container_skip_remote(state):
         console.print("  [yellow]⚠ local-container 模式：无本地 PoC，跳过远程搜索[/]")
-        return {
+        return _finish({
             "phases_tried": state.phases_tried + ["local_kb_search"],
             "current_phase": "poc_from_nvd" if state.local_only else "generate_report",
             **make_status_update(state.status_code, POC_NOT_FOUND, status_description(POC_NOT_FOUND)),
-        }
+        })
 
-    return {
+    return _finish({
         "phases_tried": state.phases_tried + ["local_kb_search"],
         "current_phase": "poc_from_nvd" if state.local_only else "reference_analysis",
-    }
+    })
 
 
 def node_poc_from_nvd(state: CVEState) -> dict:
@@ -543,11 +617,11 @@ def node_poc_from_nvd(state: CVEState) -> dict:
     for block in re.findall(r"```(?:http|text|raw)?\s*\n(.*?)```", state.nvd_description, re.S | re.I):
         requests.extend(extract_http_requests(block))
     updates = {"phases_tried": state.phases_tried + ["poc_from_nvd"]}
-    prompt = f"""Generate a conservative PoC candidate for {state.cve_id} using ONLY this local CVE data.
-Use explicit paths, parameters, payloads, or reproduction steps present in the data. Do not use references or invent endpoints.
-If no executable evidence exists, return {{\"candidates\":[]}}.
-Return JSON with candidates containing raw_http only when grounded in supplied data.
-Historical poc0911 requests are low-quality references, not proof. Cross-check them against the CVE data and produce a new grounded candidate; do not repeat previously tried requests.
+    prompt = f"""Generate 0-3 conservative PoC candidates for {state.cve_id} using ONLY this local CVE data.
+Use ONLY explicit paths, parameters, payloads, or reproduction steps present verbatim in the data. Do not use references or invent endpoints.
+If no executable evidence exists (e.g. the description only names the vulnerability or product, without a concrete path/parameter), return {{\"candidates\":[]}} — never guess a path from the CVE id or product name.
+Return JSON with candidates containing raw_http only when grounded in supplied data; output as many as the evidence supports (0-3), never pad to a fixed count.
+Historical poc0911 requests are low-quality references, not proof. Cross-check them against the CVE data and produce new grounded candidates; do not repeat previously tried requests.
 LOCAL DATA:\n{state.nvd_description}\n{state.local_knowledge_context}\n{json.dumps(state.nvd_metadata, ensure_ascii=False)[:6000]}\nProducts: {', '.join(state.affected_products[:10])}"""
     try:
         generated = _llm_poc_candidates(invoke_llm(prompt), source="local_llm",
@@ -598,6 +672,7 @@ def _search_uploaded_files(cve_id: str, paths: list[str]) -> dict:
                 "found": True,
                 "source": "uploaded_file",
                 "raw_http": requests[0],
+                "raw_http_list": requests,
                 "kb_path": str(path),
                 "validation_hint": {"type": "status_code"},
             }
@@ -606,10 +681,12 @@ def _search_uploaded_files(cve_id: str, paths: list[str]) -> dict:
             return {"found": True, "source": "uploaded_file", "yaml_content": text, "kb_path": str(path)}
         candidates = parse_poc_candidates_json(text)
         if candidates:
+            raw_http_list = [c.get("raw_http", "") for c in candidates if c.get("raw_http")]
             return {
                 "found": True,
                 "source": "uploaded_file",
-                "raw_http": candidates[0].get("raw_http", ""),
+                "raw_http": raw_http_list[0] if raw_http_list else "",
+                "raw_http_list": raw_http_list,
                 "kb_path": str(path),
                 "validation_hint": {"type": "status_code"},
             }
@@ -622,22 +699,59 @@ def node_reference_analysis(state: CVEState) -> dict:
     if not state.nvd_references:
         return {"current_phase": "trigger_agent", "phases_tried": state.phases_tried + ["reference_analysis"]}
 
-    contents = []
-    errors = []
-    # References are independent network requests.  A small bounded pool cuts
-    # wall time substantially while avoiding an unbounded burst to external sites.
+    contents: list[dict[str, str]] = []
+    errors: list[str] = []
+    cached = load_reference_cache(state.cve_id)
+    cached_by_url = {
+        str(item.get("url") or "").strip(): item
+        for item in cached
+        if str(item.get("url") or "").strip() and str(item.get("content") or "").strip()
+    }
+    if cached_by_url:
+        console.print(f"  [dim]本地参考缓存命中 {len(cached_by_url)} 条[/]")
+
     from concurrent.futures import ThreadPoolExecutor
     urls = list(state.nvd_references[:8])
     for i, url in enumerate(urls):
         console.print(f"  [{i+1}] {url[:80]}...")
-    extractor = extract_url_content_tavily if state.allow_reference_links else extract_url_content
-    with ThreadPoolExecutor(max_workers=min(4, len(urls))) as pool:
-        results = list(pool.map(extractor, urls))
-    for url, result in zip(urls, results):
-        if result.get("content"):
-            contents.append({"url": url, "title": result.get("title", ""), "content": result["content"][:3000]})
-        elif result.get("error"):
-            errors.append(f"{url}: {result.get('error')}")
+
+    missing = [url for url in urls if url not in cached_by_url]
+    fetched: list[dict[str, str]] = []
+    if missing:
+        extractor = extract_url_content_tavily if state.allow_reference_links else extract_url_content
+        with ThreadPoolExecutor(max_workers=min(4, len(missing))) as pool:
+            results = list(pool.map(extractor, missing))
+        for url, result in zip(missing, results):
+            if result.get("content"):
+                fetched.append(
+                    {
+                        "url": url,
+                        "title": result.get("title", ""),
+                        "content": result["content"][:3000],
+                    }
+                )
+            elif result.get("error"):
+                errors.append(f"{url}: {result.get('error')}")
+
+    for url in urls:
+        item = cached_by_url.get(url)
+        if item:
+            contents.append(
+                {
+                    "url": url,
+                    "title": str(item.get("title") or ""),
+                    "content": str(item.get("content") or "")[:3000],
+                }
+            )
+            continue
+        for got in fetched:
+            if got.get("url") == url:
+                contents.append(got)
+                break
+
+    merged = merge_reference_contents(cached, contents)
+    if merged:
+        save_reference_cache(state.cve_id, merged)
 
     console.print(f"  [green]✓[/] 成功提取 {len(contents)} 个页面内容")
     updates = {
@@ -670,6 +784,15 @@ def node_poc_from_refs(state: CVEState) -> dict:
     for ref in state.reference_contents:
         ref_text += f"\n### {ref['title']} ({ref['url']})\n{ref['content'][:2000]}\n"
 
+    trigger = state.trigger_candidates[0] if state.trigger_candidates else {}
+    trigger_context = ""
+    if trigger:
+        trigger_context = (
+            f"- 攻击目标: {trigger.get('attack_objective', '')}\n"
+            f"- 触发逻辑: {trigger.get('trigger_logic', '')}\n"
+            f"- 前置条件: {', '.join(trigger.get('preconditions') or []) or '无'}\n"
+            f"- 验证提示: {json.dumps(trigger.get('validation_hint') or {}, ensure_ascii=False)}"
+        )
     prompt = POC_GENERATION_FROM_REFS.format(
         cve_id=state.cve_id,
         description=state.nvd_description,
@@ -677,6 +800,7 @@ def node_poc_from_refs(state: CVEState) -> dict:
         cvss_severity=state.cvss_severity,
         affected_products=", ".join(state.affected_products[:5]),
         vuln_type=state.vuln_type,
+        trigger_context=trigger_context or "无（规则未推断出触发模型）",
         reference_contents=ref_text[:8000],
     )
 
@@ -729,7 +853,7 @@ def node_nuclei_search(state: CVEState) -> dict:
                         confidence=0.85,
                         reason=result.get("name", "nuclei 官方模板"),
                     )],
-                    fallback_phase="exploitdb_search",
+                    fallback_phase="poc_in_github",
                 ),
                 "phases_tried": state.phases_tried + ["nuclei_search"],
             }
@@ -738,7 +862,7 @@ def node_nuclei_search(state: CVEState) -> dict:
             return {
                 "error_messages": state.error_messages + [f"nuclei 搜索失败: {result.get('error')}"],
                 **make_status_update(state.status_code, hint.code, hint.message),
-                "current_phase": "exploitdb_search",
+                "current_phase": "poc_in_github",
                 "phases_tried": state.phases_tried + ["nuclei_search"],
             }
         console.print("  [yellow]⚠ nuclei 库中未找到[/]")
@@ -748,11 +872,61 @@ def node_nuclei_search(state: CVEState) -> dict:
         return {
             "error_messages": state.error_messages + [f"nuclei 搜索失败: {e}"],
             **make_status_update(state.status_code, hint.code, hint.message),
-            "current_phase": "exploitdb_search",
+            "current_phase": "poc_in_github",
             "phases_tried": state.phases_tried + ["nuclei_search"],
         }
 
-    return {"current_phase": "exploitdb_search", "phases_tried": state.phases_tried + ["nuclei_search"]}
+    return {"current_phase": "poc_in_github", "phases_tried": state.phases_tried + ["nuclei_search"]}
+
+
+def node_poc_in_github(state: CVEState) -> dict:
+    """在 PoC-in-GitHub 聚合库搜索并抓取 PoC。"""
+    console.print("[bold cyan]▶ 搜索 PoC-in-GitHub 聚合库[/]")
+    try:
+        result = search_poc_in_github(state.cve_id)
+        if result.get("found"):
+            repos = result.get("repos", [])
+            console.print(f"  [green]✓[/] 找到 {len(repos)} 个 PoC 仓库")
+            candidates = []
+            for repo in repos[:3]:
+                content = fetch_github_repo_poc(repo.get("full_name", ""))
+                if not content:
+                    continue
+                pocs = _extract_http_requests(content, state.cve_id)
+                if pocs:
+                    candidates.extend(_raw_http_candidates(
+                        pocs,
+                        source="poc-in-github",
+                        evidence_url=repo.get("html_url", ""),
+                        confidence=0.7,
+                        reason=(repo.get("description") or repo.get("name") or "GitHub PoC"),
+                    ))
+            if candidates:
+                console.print(f"  [green]✓[/] 提取到 {len(candidates)} 个 HTTP PoC 候选")
+                return {
+                    **_candidate_update(state, candidates, fallback_phase="exploitdb_search"),
+                    "phases_tried": state.phases_tried + ["poc_in_github"],
+                }
+        if result.get("error"):
+            hint = classify_error(result.get("error"), source="reference")
+            return {
+                "error_messages": state.error_messages + [f"PoC-in-GitHub 搜索失败: {result.get('error')}"],
+                **make_status_update(state.status_code, hint.code, hint.message),
+                "current_phase": "exploitdb_search",
+                "phases_tried": state.phases_tried + ["poc_in_github"],
+            }
+        console.print("  [yellow]⚠ PoC-in-GitHub 中未找到可用 PoC[/]")
+    except Exception as e:
+        hint = classify_error(e, source="reference")
+        console.print(f"  [red]✗ 搜索失败:[/] {e}")
+        return {
+            "error_messages": state.error_messages + [f"PoC-in-GitHub 搜索失败: {e}"],
+            **make_status_update(state.status_code, hint.code, hint.message),
+            "current_phase": "exploitdb_search",
+            "phases_tried": state.phases_tried + ["poc_in_github"],
+        }
+
+    return {"current_phase": "exploitdb_search", "phases_tried": state.phases_tried + ["poc_in_github"]}
 
 
 def node_exploitdb_search(state: CVEState) -> dict:
@@ -952,6 +1126,15 @@ def node_web_search(state: CVEState) -> dict:
             "phases_tried": state.phases_tried + ["web_search"],
         }
 
+    trigger = state.trigger_candidates[0] if state.trigger_candidates else {}
+    trigger_context = ""
+    if trigger:
+        trigger_context = (
+            f"- 攻击目标: {trigger.get('attack_objective', '')}\n"
+            f"- 触发逻辑: {trigger.get('trigger_logic', '')}\n"
+            f"- 前置条件: {', '.join(trigger.get('preconditions') or []) or '无'}\n"
+            f"- 验证提示: {json.dumps(trigger.get('validation_hint') or {}, ensure_ascii=False)}"
+        )
     prompt = POC_GENERATION_FROM_SEARCH.format(
         cve_id=state.cve_id,
         description=state.nvd_description,
@@ -959,6 +1142,7 @@ def node_web_search(state: CVEState) -> dict:
         cvss_severity=state.cvss_severity,
         affected_products=", ".join(state.affected_products[:5]),
         vuln_type=state.vuln_type,
+        trigger_context=trigger_context or "无（规则未推断出触发模型）",
         search_results=search_text[:8000],
     )
 
@@ -1045,6 +1229,7 @@ def node_verify_poc(state: CVEState) -> dict:
     environment = state.attack_environment or {}
     target = environment.get("target_host") or effective_target_ip()
     console.print(f"  准备验证候选，目标 {target}...")
+    t_send = time.time()
     max_requests = int(getattr(cfg, "max_requests_per_cve", 20) or 0)
     if state.local_container_mode:
         local_cap = int(getattr(cfg, "local_container_max_requests_per_cve", 6) or 6)
@@ -1064,6 +1249,14 @@ def node_verify_poc(state: CVEState) -> dict:
     else:
         result = execute_candidate(candidate, environment, cve_id=state.cve_id)
     oracle = evaluate_success(state=state, candidate=candidate, result=result, environment=environment)
+
+    # 兜底：check_ips 时序可能漏掉 CVE 精确命中（如迪普精确签名晚 1~2 秒落库），
+    # 若只有通用命中则延迟二次查询 IPS 日志，把漏掉的精确命中补回再重新判定。
+    if not oracle["ips_matched"] and oracle["generic_ips_matched"]:
+        extra = refetch_ips_cve_matches(state.cve_id, t_send)
+        if extra:
+            result["ips_matches"] = list(result.get("ips_matches", [])) + extra
+            oracle = evaluate_success(state=state, candidate=candidate, result=result, environment=environment)
 
     success = result.get("success", False)
     ips_summary = oracle["ips_summary"]
@@ -1105,6 +1298,18 @@ def node_verify_poc(state: CVEState) -> dict:
         data={"outcome": oracle["outcome"], "success_level": oracle["success_level"]},
     )
 
+    # 瘦身：剥离每条 IPS 命中里的完整防火墙日志 fields（40+ 字段），只保留关键字段，避免 result.json 膨胀。
+    def _slim_match(match: dict) -> dict:
+        if not isinstance(match, dict):
+            return match
+        return {k: v for k, v in match.items() if k not in {"fields", "Fields"}}
+
+    all_matches_slim = [_slim_match(m) for m in ips_classification["all_matches"]]
+    cve_matches_slim = [_slim_match(m) for m in ips_classification["cve_matches"]]
+    generic_matches_slim = [_slim_match(m) for m in ips_classification["generic_matches"]]
+    # oracle 里不再重复存整份 ips_classification（命中详情已由上面三个字段承载）
+    oracle_slim = {k: v for k, v in oracle.items() if k != "ips_classification"}
+
     updates = {
         "candidate_reviews": state.candidate_reviews + [critic["review"]],
         "agent_trace": _append_agent_event(
@@ -1125,12 +1330,12 @@ def node_verify_poc(state: CVEState) -> dict:
         "pcap_file_path": result.get("pcap_file_path", ""),
         "ips_matched": ips_matched,
         "generic_ips_matched": generic_ips_matched,
-        "ips_match_details": ips_classification["all_matches"],
-        "cve_ips_match_details": ips_classification["cve_matches"],
-        "generic_ips_match_details": ips_classification["generic_matches"],
+        "ips_match_details": all_matches_slim,
+        "cve_ips_match_details": cve_matches_slim,
+        "generic_ips_match_details": generic_matches_slim,
         "ips_match_summary": ips_summary,
         "executor_result": result,
-        "oracle_result": oracle,
+        "oracle_result": oracle_slim,
         "target_oracle_success": bool(target_oracle.get("success", False)),
         "target_oracle_type": target_oracle.get("type", ""),
         "target_oracle_details": target_oracle,
@@ -1138,7 +1343,9 @@ def node_verify_poc(state: CVEState) -> dict:
         "milestones": milestones,
     }
 
-    if candidate.get("source") == "local_kb_poc0911":
+    if candidate.get("source") == "local_kb_poc0911" and not ips_matched and not target_oracle.get("success"):
+        # poc0911 历史 PoC 仅作参考：只有它没命中当前 CVE 时才丢弃结果、继续构造新 PoC。
+        # 一旦命中当前 CVE（ips_matched 或目标侧 oracle 成功），就是有效复现，走下方 SUCCESS 分支。
         updates["attempt_history"] = _append_attempt_history(
             state, result, ips_summary, ips_matched, generic_ips_matched, oracle["outcome"],
             oracle_result=oracle, candidate=candidate,
@@ -1281,11 +1488,22 @@ def node_save_to_local_kb(state: CVEState) -> dict:
             "references": state.nvd_references,
             "timestamp": datetime.now().isoformat(),
         }
+        raw_http_list: list[str] = []
+        seen_raw_http: set[str] = set()
+        for candidate in state.poc_candidates or []:
+            raw_http = str(candidate.get("raw_http") or "").strip()
+            if raw_http and raw_http not in seen_raw_http:
+                seen_raw_http.add(raw_http)
+                raw_http_list.append(raw_http)
+        if state.poc_raw_http and state.poc_raw_http.strip() not in seen_raw_http:
+            raw_http_list.append(state.poc_raw_http.strip())
+
         path = save_to_local_kb(
             state.cve_id,
             poc_raw_http=state.poc_raw_http,
             poc_nuclei_yaml=state.poc_nuclei_yaml,
             metadata=metadata,
+            poc_raw_http_list=raw_http_list or None,
         )
         if path:
             console.print(f"  [green]✓[/] 已保存到 {path}")
@@ -1303,7 +1521,8 @@ def node_generate_report(state: CVEState) -> dict:
 
     if state.status != "SUCCESS":
         final_status = "FAILURE"
-        if not state.is_http_vuln and getattr(state, "protocol", "") != PROTOCOL_DATABASE:
+        protocol = getattr(state, "protocol", "") or ""
+        if not _is_runnable_protocol(protocol, bool(state.is_http_vuln)):
             final_code = state.status_code or PROTOCOL_UNSUPPORTED
             final_msg = state.message or status_description(final_code)
         elif state.status_code == PARAMETER_ERROR:
@@ -1430,43 +1649,15 @@ def node_generate_report(state: CVEState) -> dict:
         "status_code": final_code,
         "message": final_msg,
         "nvd_description": state.nvd_description,
-        "nvd_source": state.nvd_source,
-        "nvd_metadata": state.nvd_metadata,
-        "local_only": state.local_only,
-        "target_ip": state.target_ip,
         "cvss_score": state.cvss_score,
         "cvss_severity": state.cvss_severity,
         "vuln_type": state.vuln_type,
         "poc_source": state.poc_source,
-        "poc_raw_http": state.poc_raw_http,
-        "poc_candidates": [_candidate_history_view(candidate) for candidate in state.poc_candidates],
-        "current_candidate_index": state.current_candidate_index,
-        "attempt_history": state.attempt_history,
-        "agent_trace": state.agent_trace,
-        "environment_candidates": state.environment_candidates,
-        "attack_environment": attack_environment,
-        "environment_spec": environment_spec,
-        "environment_manifest_path": state.environment_manifest_path,
-        "environment_setup_result": state.environment_setup_result,
-        "environment_teardown_result": teardown_result,
-        "trigger_candidates": state.trigger_candidates,
-        "validation_hints": state.validation_hints,
-        "candidate_reviews": state.candidate_reviews,
-        "milestones": milestones,
-        "executor_result": state.executor_result,
-        "oracle_result": state.oracle_result,
-        "target_oracle_success": state.target_oracle_success,
-        "target_oracle_type": state.target_oracle_type,
-        "target_oracle_details": state.target_oracle_details,
+        "target_ip": state.target_ip,
+        "protocol": getattr(state, "protocol", "") or ("http" if state.is_http_vuln else "unsupported"),
         "success_level": state.success_level,
         "success_tier": success_tier,
         "failure_class": failure_class,
-        "protocol": getattr(state, "protocol", "") or ("http" if state.is_http_vuln else "unsupported"),
-        "execution_spec": getattr(state, "execution_spec", {}) or {},
-        "version_evidence": version_evidence,
-        "repro_bundle_path": repro_bundle.get("path", ""),
-        "repro_bundle_complete": bool(repro_bundle.get("complete")),
-        "repro_bundle": repro_bundle,
         "phases_tried": state.phases_tried,
         "ips_matched": state.ips_matched,
         "generic_ips_matched": state.generic_ips_matched,
@@ -1848,7 +2039,6 @@ def _candidate_history_view(candidate: dict) -> dict:
         "evidence_url": candidate.get("evidence_url", ""),
         "confidence": candidate.get("confidence", 0.0),
         "reason": candidate.get("reason", ""),
-        "raw_http": candidate.get("raw_http", ""),
         "nuclei_yaml_preview": candidate.get("nuclei_yaml", "")[:2000],
     }
     if isinstance(candidate.get("execution_spec"), dict):
@@ -1943,8 +2133,14 @@ def _next_phase_after_verify(state: CVEState) -> str:
         phase_order = ["local_kb_search", "nuclei_search"]
     else:
         phase_order = [
-            "local_kb_search", "reference_analysis", "poc_from_refs", "nuclei_search",
-            "exploitdb_search", "imfht_search", "web_search",
+            "local_kb_search",
+            "reference_analysis",
+            "poc_from_refs",
+            "nuclei_search",
+            "poc_in_github",
+            "exploitdb_search",
+            "imfht_search",
+            "web_search",
         ]
 
     tried = set(state.phases_tried)
@@ -1988,12 +2184,11 @@ def route_after_validate(state: CVEState) -> str:
 def route_after_type_check(state: CVEState) -> str:
     if getattr(state, "stop_after", "") == "analysis":
         return "generate_report"
-    if state.local_only:
-        return "environment_agent"
-    # HTTP 与数据库可继续；其余非 HTTP 仅保留接口，直接归档。
-    if state.is_http_vuln or getattr(state, "protocol", "") == PROTOCOL_DATABASE:
-        return "environment_agent"
-    return "generate_report"
+    # 以 protocol 为准：LLM 误判非 HTTP 但已推断为 http/database 时继续。
+    if not _is_runnable_protocol(getattr(state, "protocol", "") or "", bool(state.is_http_vuln)):
+        return "generate_report"
+    # 正常 HTTP 路径不调用 EnvironmentAgent；仅 local-container 需要搭环境。
+    return _next_phase_after_classification(state)
 
 
 def route_after_environment(state: CVEState) -> str:
@@ -2033,7 +2228,7 @@ def route_after_phase(state: CVEState) -> str:
     """通用路由：根据 current_phase 决定下一个节点。"""
     phase = state.current_phase
     if state.local_only:
-        if phase in {"nuclei_search", "exploitdb_search", "imfht_search", "web_search"}:
+        if phase in {"nuclei_search", "poc_in_github", "exploitdb_search", "imfht_search", "web_search"}:
             return _next_phase_after_verify(state)
         if not state.allow_reference_links and phase in {"reference_analysis", "poc_from_refs"}:
             return "generate_report"
@@ -2051,6 +2246,7 @@ def route_after_phase(state: CVEState) -> str:
         "poc_from_refs": "poc_from_refs",
         "poc_from_nvd": "poc_from_nvd",
         "nuclei_search": "nuclei_search",
+        "poc_in_github": "poc_in_github",
         "exploitdb_search": "exploitdb_search",
         "imfht_search": "imfht_search",
         "web_search": "web_search",
@@ -2086,6 +2282,7 @@ def build_graph() -> StateGraph:
     workflow.add_node("trigger_agent", node_trigger_agent)
     workflow.add_node("poc_from_refs", node_poc_from_refs)
     workflow.add_node("nuclei_search", node_nuclei_search)
+    workflow.add_node("poc_in_github", node_poc_in_github)
     workflow.add_node("exploitdb_search", node_exploitdb_search)
     workflow.add_node("imfht_search", node_imfht_search)
     workflow.add_node("web_search", node_web_search)
@@ -2107,7 +2304,7 @@ def build_graph() -> StateGraph:
     workflow.add_edge("trigger_agent", "poc_from_refs")
 
     # PoC 搜索链和验证的路由
-    for node in ["poc_from_refs", "nuclei_search", "exploitdb_search",
+    for node in ["poc_from_refs", "nuclei_search", "poc_in_github", "exploitdb_search",
                   "imfht_search", "web_search", "verify_poc",
                   "archive", "save_to_local_kb"]:
         workflow.add_conditional_edges(node, route_after_phase)

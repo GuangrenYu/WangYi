@@ -25,6 +25,9 @@ from cve_hunter.config import cfg
 from cve_hunter.runtime import effective_target_ip, as_target_url
 from cve_hunter.safety import is_local_lab_host
 
+# IPS 日志接口默认 page_size=100，二次查询窗口内告警可能远超这个数，显式放大。
+IPS_LOG_PAGE_SIZE = 1000
+
 
 def send_poc_and_capture(
     *,
@@ -176,6 +179,75 @@ def _post_http2pcap(path: str, *, json: dict, timeout: int) -> dict:
             f"http2pcap 返回非 JSON 响应: status={resp.status_code}, "
             f"content_type={resp.headers.get('content-type', '')}, body={body}"
         ) from exc
+
+
+def _log_received_epoch(log: dict) -> float:
+    """取采集端的入库时间。
+
+    华三设备的 ``timestamp`` 是 UTC（比本地早 8 小时，实测同一条告警
+    ``timestamp=04:39:04`` 而 ``received_at=12:39:05``），判时序只能用 received_at。
+    解析不出来时返回 inf，宁可多算一条也不漏。
+    """
+    stamp = str(log.get("received_at") or "").strip()
+    try:
+        return time.mktime(time.strptime(stamp, "%Y-%m-%d %H:%M:%S"))
+    except (ValueError, TypeError):
+        return float("inf")
+
+
+def refetch_ips_cve_matches(cve_id: str, since_epoch: float) -> list[dict]:
+    """延迟后多次二次查询 IPS 日志，补回 check_ips 因时序漏掉的 CVE 精确命中。
+
+    http2pcap 的 check_ips 发完包后立即查 IPS，部分精确签名（如迪普的
+    Joomla 文件上传）会晚几秒才落库，导致只拿到通用/误报命中。
+    这里在累计 3/6/10 秒后各查一次，命中即返回，扩大时序窗口。
+
+    两个和接口行为绑定的细节：
+    - 日志接口只认 ``start_time``/``end_time``。写成 ``startTime``/``endTime``
+      会被忽略，服务端退回全天窗口（实测返回 7554 条整天日志、且默认只给
+      page_size=100 条），既漏又串。
+    - 即便窗口正确，也按 ``received_at`` 再做一次客户端过滤，防止旧告警被算成本次命中。
+    """
+    target = cve_id.upper()
+    parsed = urlparse(cfg.ips_api_url)
+    base = f"{parsed.scheme}://{parsed.netloc}"
+    floor = since_epoch - 10
+    start = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(floor))
+    for delay in (3.0, 3.0, 4.0):
+        time.sleep(delay)
+        end = time.strftime("%Y-%m-%d %H:%M:%S")
+        try:
+            resp = httpx.get(
+                f"{base}/api/logs",
+                params={
+                    "start_time": start,
+                    "end_time": end,
+                    "page": 1,
+                    "page_size": IPS_LOG_PAGE_SIZE,
+                },
+                timeout=15,
+                trust_env=False,
+            )
+            if resp.status_code != 200:
+                continue
+            logs = resp.json().get("data", [])
+        except Exception:
+            continue
+        matches = []
+        for log in logs:
+            if not isinstance(log, dict):
+                continue
+            if _log_received_epoch(log) < floor:
+                continue
+            fields = log.get("fields") or {}
+            cve_list = str(log.get("cve_list") or "")
+            fields_cve = str(fields.get("CVE") or "") if isinstance(fields, dict) else ""
+            attack = str(log.get("attack_name") or "")
+            if target in (cve_list + fields_cve + attack).upper():
+                matches.append(log)
+        if matches:
+            return matches
+    return []
 
 
 def _send_builtin(raw_http: str, target_url: str = "", cve_id: str = "") -> dict:

@@ -384,12 +384,8 @@ def _with_executor_metadata(
     enriched["executor"] = executor
     enriched["target_url"] = target_url
     enriched["target_host"] = target_host
-    if request_raw:
-        enriched["request_raw"] = request_raw
     if step_index is not None:
         enriched["step_index"] = step_index
-    if step_results is not None:
-        enriched["step_results"] = step_results
     return enriched
 
 

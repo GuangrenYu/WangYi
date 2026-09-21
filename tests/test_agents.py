@@ -780,6 +780,81 @@ class AgentTests(unittest.TestCase):
         self.assertEqual(enriched["validation_hint"]["type"], "response_contains")
         self.assertTrue(result["review"]["accepted"])
 
+    def test_trigger_agent_never_calls_llm_even_when_enabled(self):
+        state = CVEState(
+            cve_id="CVE-2024-0004",
+            nvd_description="Remote code execution via crafted HTTP request.",
+            vuln_type="RCE",
+            reference_contents=[{"url": "http://example", "title": "x", "content": "GET /x HTTP/1.1"}],
+        )
+        with (
+            patch("cve_hunter.agents.cfg", SimpleNamespace(agent_llm_enabled=True, callback_url="")),
+            patch("cve_hunter.agents._run_trigger_agent_llm") as llm,
+        ):
+            result = run_trigger_agent(state)
+
+        llm.assert_not_called()
+        self.assertEqual(result["trace"]["data"]["llm_enabled"], False)
+        self.assertEqual(result["trigger_candidates"][0]["attack_objective"], "command_execution")
+
+    def test_environment_agent_never_calls_llm_even_when_enabled(self):
+        state = CVEState(cve_id="CVE-2024-0005", environment_discovery=True)
+        fake_cfg = SimpleNamespace(
+            vulhub_dir="missing-vulhub",
+            auto_env_enabled=False,
+            agent_llm_enabled=True,
+            agent_llm_model="test-model",
+            llm_model="test-model",
+            attack_env_compose_file="",
+            attack_env_target_url="",
+            target_ip="127.0.0.1",
+        )
+        with (
+            patch("cve_hunter.agents.cfg", fake_cfg),
+            patch("cve_hunter.agents._run_environment_agent_llm") as llm,
+        ):
+            result = run_environment_agent(state)
+
+        llm.assert_not_called()
+        self.assertEqual(result["trace"]["data"]["llm_enabled"], False)
+
+    def test_critic_llm_skipped_for_high_confidence_local_kb(self):
+        state = CVEState(cve_id="CVE-2024-0006", current_candidate_index=0)
+        candidate = {
+            "kind": "raw_http",
+            "source": "local_kb_custom",
+            "raw_http": "GET /vuln HTTP/1.1\nHost: {{TARGET_HOST}}\n\n",
+            "confidence": 0.95,
+        }
+        with (
+            patch("cve_hunter.agents.cfg", SimpleNamespace(agent_llm_enabled=True)),
+            patch("cve_hunter.agents._run_critic_agent_llm") as llm,
+        ):
+            result = run_critic_agent(state, candidate)
+
+        llm.assert_not_called()
+        self.assertTrue(result["review"].get("llm_skipped"))
+
+    def test_critic_llm_used_for_ai_generated_candidate(self):
+        state = CVEState(cve_id="CVE-2024-0007", current_candidate_index=0)
+        candidate = {
+            "kind": "raw_http",
+            "source": "reference",
+            "raw_http": "GET /vuln HTTP/1.1\nHost: {{TARGET_HOST}}\n\n",
+            "confidence": 0.65,
+        }
+        with (
+            patch("cve_hunter.agents.cfg", SimpleNamespace(agent_llm_enabled=True)),
+            patch(
+                "cve_hunter.agents._run_critic_agent_llm",
+                return_value={"accepted": True, "flags": [], "confidence_after": 0.7, "reason": "ok"},
+            ) as llm,
+        ):
+            result = run_critic_agent(state, candidate)
+
+        llm.assert_called_once()
+        self.assertIn("llm_review", result["review"])
+
 
 if __name__ == "__main__":
     unittest.main()

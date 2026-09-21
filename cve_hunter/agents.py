@@ -1,20 +1,16 @@
 """Multi-agent role definitions and helper implementations.
 
 Agent 职责速览：
-- EnvironmentAgent：负责攻击环境规划/可选搭建。它查找显式 compose、vulhub
-  compose，产出 target_url/target_host/compose_file；默认不启动 Docker，只有
-  AUTO_ENV_ENABLED=true 时才执行 docker compose。它不生成 PoC、不判定成功。
-- TriggerAgent：负责把 CVE 描述、漏洞类型和产品信息抽象成 trigger_logic、
-  attack_objective、preconditions、variable_slots、validation_hint。它不发包。
-- CriticAgent：负责审查当前 PoC 候选是否可执行，并补充 trigger_id、
-  attack_objective、validation_hint、preconditions，降低缺证据/格式异常候选的
-  置信度。它不搜索情报、不发包、不生成新 PoC。
-- ReporterAgent：当前由 graph.py 的 node_generate_report 承担，负责归档
-  agent_trace、attempt_history、oracle_result 和最终报告。
-
-AGENT_LLM_ENABLED=true 时，EnvironmentAgent/TriggerAgent/CriticAgent 会优先
-调用 .env 中配置的大模型；AGENT_LLM_MODEL 留空时复用 LLM_MODEL，例如当前
-deepseek-v4-pro。LLM 调用失败时会自动退回确定性规则，保持主链路可运行。
+- EnvironmentAgent：仅 local-container 模式使用。负责 vulhub/compose 发现与可选
+  启动；正常 HTTP 路径由 graph 直接跳过本 agent，改用 TARGET_IP 默认目标。
+  不再调用 LLM（环境决策由确定性规则完成）。
+- TriggerAgent：用确定性规则抽象 trigger_logic / attack_objective /
+  validation_hint。为节省 token，不再调用 LLM；大段 References 只喂给
+  poc_from_refs 一次。
+- CriticAgent：审查当前 PoC 候选是否可执行，并补充 trigger_id、
+  attack_objective、validation_hint。仅当 AGENT_LLM_ENABLED=true 且候选来自
+  AI 生成或置信度偏低时才调用 LLM；高置信本地 KB 候选只走规则审查。
+- ReporterAgent：当前由 graph.py 的 node_generate_report 承担，负责归档。
 """
 
 from __future__ import annotations
@@ -168,19 +164,6 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
         environment.update(_default_environment())
         environment["setup_mode"] = "disabled"
 
-    llm_plan = {}
-    llm_error = ""
-    if getattr(cfg, "agent_llm_enabled", False) and not state.local_only and not (local_container_mode and not candidates):
-        try:
-            llm_plan = _run_environment_agent_llm(state, candidates, environment)
-            environment["llm_plan"] = llm_plan
-            if status == "planned":
-                status = "llm_planned"
-            summary = f"{summary}；LLM 环境建议已生成"
-        except Exception as exc:
-            llm_error = str(exc)
-            environment["llm_error"] = llm_error
-
     return {
         "environment_candidates": candidates,
         "attack_environment": environment,
@@ -195,24 +178,18 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
                 "local_container_mode": local_container_mode,
                 "candidate_count": len(candidates),
                 "target_url": environment.get("target_url", ""),
-                "llm_enabled": getattr(cfg, "agent_llm_enabled", False),
-                "llm_model": _agent_llm_model() if getattr(cfg, "agent_llm_enabled", False) else "",
-                "llm_plan": llm_plan,
-                "llm_error": llm_error,
+                "llm_enabled": False,
+                "llm_model": "",
             },
         },
     }
 
 
 def run_trigger_agent(state: CVEState) -> dict[str, Any]:
-    """Extract a coarse trigger model and default validation hint."""
-    llm_error = ""
-    if getattr(cfg, "agent_llm_enabled", False) and not state.local_only:
-        try:
-            return _run_trigger_agent_llm(state)
-        except Exception as exc:
-            llm_error = str(exc)
+    """Extract a coarse trigger model with deterministic rules only.
 
+    References 正文只喂给 poc_from_refs，避免 Trigger/PoC 两端重复消耗 token。
+    """
     text = " ".join([
         state.cve_id,
         state.nvd_description,
@@ -240,14 +217,13 @@ def run_trigger_agent(state: CVEState) -> dict[str, Any]:
         "trace": {
             "agent": "TriggerAgent",
             "action": "extract_trigger_logic",
-            "status": "rule_fallback_after_llm_error" if llm_error else "completed",
+            "status": "completed",
             "summary": f"推断攻击目标: {objective}",
             "data": {
                 "attack_objective": objective,
                 "validation_hint": validation_hint,
-                "llm_enabled": getattr(cfg, "agent_llm_enabled", False),
-                "llm_model": _agent_llm_model() if getattr(cfg, "agent_llm_enabled", False) else "",
-                "llm_error": llm_error,
+                "llm_enabled": False,
+                "llm_model": "",
             },
         },
     }
@@ -311,13 +287,16 @@ def run_critic_agent(state: CVEState, candidate: dict[str, Any]) -> dict[str, An
         "timestamp": datetime.now().isoformat(),
     }
     llm_error = ""
-    if getattr(cfg, "agent_llm_enabled", False) and not state.local_only:
+    if _should_invoke_critic_llm(state, enriched):
         try:
             llm_review = _run_critic_agent_llm(state, enriched, review)
             enriched, review = _merge_llm_critic_review(enriched, review, llm_review)
         except Exception as exc:
             llm_error = str(exc)
             review["llm_error"] = llm_error
+    else:
+        review["llm_skipped"] = True
+        review["llm_skip_reason"] = _critic_llm_skip_reason(state, enriched)
 
     return {
         "candidate": enriched,
@@ -2205,6 +2184,41 @@ def _default_environment() -> dict[str, Any]:
         "setup_mode": "not_required",
         "reason": "使用 TARGET_IP 或默认 127.0.0.1",
     }
+
+
+def default_attack_environment(*, setup_mode: str = "disabled") -> dict[str, Any]:
+    """Public helper for graph paths that skip EnvironmentAgent."""
+    environment = _default_environment()
+    environment["setup_mode"] = setup_mode
+    return environment
+
+
+# AI 生成或低置信候选才值得花 Critic LLM；高置信本地 KB 只走规则。
+_AI_POC_SOURCES = frozenset({"reference", "search", "local_llm"})
+_CRITIC_LLM_CONFIDENCE_THRESHOLD = 0.7
+
+
+def _should_invoke_critic_llm(state: CVEState, candidate: dict[str, Any]) -> bool:
+    if not getattr(cfg, "agent_llm_enabled", False) or state.local_only:
+        return False
+    source = str(candidate.get("source") or "")
+    if source in _AI_POC_SOURCES:
+        return True
+    confidence = _coerce_float(candidate.get("confidence"), 0.5)
+    return confidence < _CRITIC_LLM_CONFIDENCE_THRESHOLD
+
+
+def _critic_llm_skip_reason(state: CVEState, candidate: dict[str, Any]) -> str:
+    if not getattr(cfg, "agent_llm_enabled", False):
+        return "agent_llm_disabled"
+    if state.local_only:
+        return "local_only"
+    source = str(candidate.get("source") or "")
+    confidence = _coerce_float(candidate.get("confidence"), 0.5)
+    return (
+        f"trusted_source:{source or 'unknown'}"
+        f"(confidence={confidence:.2f}>={_CRITIC_LLM_CONFIDENCE_THRESHOLD})"
+    )
 
 
 def _default_target_url() -> str:

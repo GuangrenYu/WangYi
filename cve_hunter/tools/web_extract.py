@@ -41,22 +41,46 @@ def extract_url_content(url: str) -> dict[str, str]:
 
 
 def extract_url_content_tavily(url: str) -> dict[str, str]:
-    """Fetch one NVD reference through Tavily's extract endpoint."""
+    """Fetch one NVD reference through Tavily, falling back to wayback/builtin."""
+    tavily_error = ""
     try:
         if not cfg.tavily_api_key:
-            return {"url": url, "title": "", "content": "", "error": "TAVILY_API_KEY 未配置"}
-        result = post_tavily(
-            "extract", api_key=cfg.tavily_api_key,
-            payload={"urls": [url], "include_images": False},
-            proxy=cfg.httpx_proxy,
-        )
-        if not result.get("results") and result.get("failed_results"):
-            failure = result["failed_results"][0]
-            return {"url": url, "title": "", "content": "", "error": str(failure.get("error") or "Tavily 未提取到参考正文")}
-        item = (result.get("results") or [{}])[0]
-        return {"url": url, "title": item.get("title", ""), "content": item.get("raw_content", "") or item.get("content", "")}
+            tavily_error = "TAVILY_API_KEY 未配置"
+        else:
+            result = post_tavily(
+                "extract", api_key=cfg.tavily_api_key,
+                payload={"urls": [url], "include_images": False},
+                proxy=cfg.httpx_proxy,
+            )
+            if not result.get("results") and result.get("failed_results"):
+                failure = result["failed_results"][0]
+                tavily_error = str(failure.get("error") or "Tavily 未提取到参考正文")
+            else:
+                item = (result.get("results") or [{}])[0]
+                content = item.get("raw_content", "") or item.get("content", "") or ""
+                if str(content).strip():
+                    return {
+                        "url": url,
+                        "title": item.get("title", ""),
+                        "content": content,
+                        "source": "tavily",
+                    }
+                tavily_error = "Tavily 返回空正文"
     except Exception as exc:
-        return {"url": url, "title": "", "content": "", "error": str(exc)}
+        tavily_error = str(exc)
+
+    fallback = extract_url_content(url)
+    if fallback.get("content"):
+        fallback["fallback_from"] = "tavily"
+        if tavily_error:
+            fallback["service_error"] = tavily_error
+        return fallback
+    err = fallback.get("error") or ""
+    if tavily_error and err:
+        fallback["error"] = f"tavily: {tavily_error}; fallback: {err}"
+    elif tavily_error:
+        fallback["error"] = tavily_error
+    return fallback
 
 
 def _extract_via_service(url: str) -> dict[str, str]:

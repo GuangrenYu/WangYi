@@ -43,6 +43,16 @@ def infer_protocol(
     if any(marker in text for marker in ("ssh", "ftp", "smtp", "ldap", "mqtt", "tcp", "udp", "smb")):
         return PROTOCOL_TCP
 
+    # 即便 AI 把「PHP 缓冲区溢出 / ActiveX / Web 组件」这类判成非 HTTP，只要描述/类型
+    # 里出现明确的 Web 技术关键词，也应按 HTTP 继续走（否则会误报「协议执行器未实现」）。
+    web_markers = (
+        "php", "activex", "web", "http", "https", "cgi", "asp", "jsp",
+        "apache", "iis", "nginx", "tomcat", "servlet", "browser",
+        "javascript", "html", "joomla", "wordpress", "drupal",
+    )
+    if any(marker in text for marker in web_markers):
+        return PROTOCOL_HTTP
+
     if is_http_vuln:
         return PROTOCOL_HTTP
     return PROTOCOL_UNSUPPORTED
