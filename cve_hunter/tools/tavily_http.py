@@ -7,11 +7,17 @@ import re
 import httpx
 
 
-def post_tavily(endpoint, *, api_key, payload, proxy=None):
+def post_tavily(endpoint, *, api_key, payload, proxy=None, timeout=None):
+    """Call Tavily, optionally bounding the request for a web-source path.
+
+    Existing callers keep the historical 90s total/15s connect timeout when
+    ``timeout`` is omitted.  Bounded callers can pass a numeric timeout (or an
+    ``httpx.Timeout`` instance) without changing the proxy retry behavior.
+    """
     options = dict(
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         json=payload,
-        timeout=httpx.Timeout(90.0, connect=15.0),
+        timeout=(httpx.Timeout(90.0, connect=15.0) if timeout is None else timeout),
         trust_env=False,
     )
     url = f"https://api.tavily.com/{endpoint}"

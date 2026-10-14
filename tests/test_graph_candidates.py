@@ -95,6 +95,23 @@ class GraphCandidateTests(unittest.TestCase):
         self.assertEqual(update["milestones"]["candidate_collected"]["status"], "passed")
         self.assertEqual(update["milestones"]["candidate_collected"]["data"]["added_count"], 2)
 
+    def test_multistep_candidate_is_not_deduped_with_first_step(self):
+        first = _raw("/login")
+        state = CVEState()
+        candidates = _raw_http_candidates([first], source="local_kb_custom")
+        candidates.append({
+            "kind": "raw_http",
+            "source": "local_kb_custom",
+            "raw_http": first,
+            "request_steps": [
+                {"raw_http": first, "step_index": 1},
+                {"raw_http": _raw("/admin"), "step_index": 2},
+            ],
+        })
+        update = _candidate_update(state, candidates)
+        self.assertEqual(len(update["poc_candidates"]), 2)
+        self.assertEqual(len(update["poc_candidates"][1]["request_steps"]), 2)
+
     def test_duplicate_candidate_uses_fallback_phase(self):
         candidates = _raw_http_candidates([_raw("/first")], source="reference")
         state = CVEState(poc_candidates=candidates)
@@ -136,6 +153,43 @@ class GraphCandidateTests(unittest.TestCase):
 
         with patch("cve_hunter.graph.console.quiet", True):
             update = _next_attempt_or_phase_update(state)
+
+        self.assertEqual(update["current_phase"], "verify_poc")
+        self.assertEqual(update["current_candidate_index"], 1)
+        self.assertIn("/second", update["poc_raw_http"])
+
+    def test_new_candidates_are_dispatched_immediately_after_prior_attempt(self):
+        first = _raw_http_candidates([_raw("/first")], source="local_kb_poc0911")[0]
+        state = CVEState(
+            poc_candidates=[first],
+            current_candidate_index=0,
+            attempt_history=[{"candidate_index": 0, "request_success": True}],
+            phases_tried=["local_kb_search", "reference_analysis"],
+        )
+        second = _raw_http_candidates([_raw("/generated")], source="reference")[0]
+
+        update = _candidate_update(state, [second], fallback_phase="poc_from_refs")
+        dispatched = replace(state, **update)
+
+        self.assertEqual(update["current_phase"], "verify_poc")
+        self.assertEqual(update["current_candidate_index"], 1)
+        self.assertEqual(route_after_phase(dispatched), "verify_poc")
+        self.assertIn("/generated", update["poc_raw_http"])
+
+    def test_attempt_ledger_skips_already_sent_candidates(self):
+        candidates = _raw_http_candidates(
+            [_raw("/first"), _raw("/second"), _raw("/third")], source="reference"
+        )
+        state = CVEState(
+            poc_candidates=candidates,
+            current_candidate_index=2,
+            attempt_history=[
+                {"candidate_index": 0, "request_success": True},
+                {"candidate_index": 2, "request_success": True},
+            ],
+        )
+
+        update = _next_attempt_or_phase_update(state)
 
         self.assertEqual(update["current_phase"], "verify_poc")
         self.assertEqual(update["current_candidate_index"], 1)

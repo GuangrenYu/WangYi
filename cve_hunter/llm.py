@@ -25,7 +25,9 @@ def get_llm(*, model: str | None = None, temperature: float = 0.2, max_tokens: i
             return None
         import httpx as _httpx
         from langchain_openai import ChatOpenAI
-        http_client = _httpx.Client(proxy=cfg.httpx_proxy, trust_env=False)
+        # LLM 网关直连：不要走系统/Clash 代理。代理波动会导致 Connection error，
+        # 而 tinysnow 等国内可达网关直连更稳；搜索(Tavily)仍可单独走 cfg.httpx_proxy。
+        http_client = _httpx.Client(proxy=None, trust_env=False)
         _llm_cache[cache_key] = ChatOpenAI(
             model=cache_key[0],
             api_key=cfg.llm_api_key,

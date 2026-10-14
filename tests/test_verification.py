@@ -6,7 +6,7 @@ from cve_hunter.graph import node_save_to_local_kb
 from cve_hunter.state import CVEState
 from cve_hunter.status_codes import CAPTURE_SUCCESS, EXECUTION_POLICY_BLOCKED, TARGET_ORACLE_SUCCESS
 from cve_hunter.tools.http_sender import _is_local_raw_target
-from cve_hunter.verification import RequestExecutor, SuccessOracle, evaluate_success, evaluate_target_oracle
+from cve_hunter.verification import RequestExecutor, SuccessOracle, _prepare_raw_http, evaluate_success, evaluate_target_oracle
 
 
 class VerificationTests(unittest.TestCase):
@@ -83,6 +83,15 @@ class VerificationTests(unittest.TestCase):
         raw_http = "GET /poc HTTP/1.1\nHost: 127.0.0.1:8080\n\n"
 
         self.assertTrue(_is_local_raw_target(raw_http))
+
+    def test_prepare_raw_http_restores_target_port_for_ip_only_host(self):
+        raw = "GET /exact HTTP/1.1\nHost: 10.55.1.21\n\n"
+        prepared = _prepare_raw_http(raw, "10.55.1.21:7788")
+        self.assertIn("Host: 10.55.1.21:7788", prepared)
+
+    def test_prepare_raw_http_preserves_explicit_host_and_domain(self):
+        self.assertIn("Host: 10.55.1.21:80", _prepare_raw_http("GET / HTTP/1.1\nHost: 10.55.1.21:80\n\n", "10.55.1.21:7788"))
+        self.assertIn("Host: example.test", _prepare_raw_http("GET / HTTP/1.1\nHost: example.test\n\n", "10.55.1.21:7788"))
 
     def test_target_oracle_success_does_not_save_custom_kb(self):
         state = CVEState(

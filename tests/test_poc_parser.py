@@ -95,6 +95,20 @@ Host: {{TARGET_HOST}}
 
         self.assertEqual(len(requests), 1)
 
+    def test_parse_preserves_ordered_request_steps_and_encoding(self):
+        text = '{"candidates":[{"request_steps":[{"method":"GET","path":"/cgi-bin/a%00"},{"raw_http":"POST /next?x=..%2f HTTP/1.1\\nHost: {{TARGET_HOST}}\\n\\nbody"}],"evidence_quote":"/cgi-bin/a%00","encoding_preserved":true}]}'
+        candidate = parse_poc_candidates_json(text)[0]
+        self.assertEqual(len(candidate["request_steps"]), 2)
+        self.assertIn("/cgi-bin/a%00", candidate["request_steps"][0]["raw_http"])
+        self.assertIn("..%2f", candidate["request_steps"][1]["raw_http"])
+        self.assertTrue(candidate["encoding_preserved"])
+
+    def test_extracts_curl_and_python_http_calls(self):
+        text = '''curl -X POST "http://example.test/cgi-bin/a?x=%00" -H "X-Test: yes" --data-raw "p=../"\nrequests.get("http://example.test/cgi-bin/b?z=1")'''
+        requests = extract_http_requests(text)
+        self.assertTrue(any("POST /cgi-bin/a?x=%00 HTTP/1.1" in item and "p=../" in item for item in requests))
+        self.assertTrue(any("GET /cgi-bin/b?z=1 HTTP/1.1" in item for item in requests))
+
 
 if __name__ == "__main__":
     unittest.main()

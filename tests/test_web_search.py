@@ -6,7 +6,7 @@ from cve_hunter.tools import web_search
 
 
 class WebSearchFallbackTests(unittest.TestCase):
-    def test_tavily_error_falls_back_to_duckduckgo(self):
+    def test_free_results_do_not_call_paid_search(self):
         with (
             patch.object(web_search, "cfg", SimpleNamespace(tavily_api_key="key")),
             patch.object(
@@ -22,7 +22,7 @@ class WebSearchFallbackTests(unittest.TestCase):
         ):
             results = web_search.search_web("CVE-2024-0001 PoC", max_results=3)
 
-        tavily.assert_called_once_with("CVE-2024-0001 PoC", 3)
+        tavily.assert_not_called()
         duckduckgo.assert_called_once_with("CVE-2024-0001 PoC", 3)
         self.assertEqual(results[0]["title"], "result")
 

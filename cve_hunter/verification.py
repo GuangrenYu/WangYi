@@ -15,6 +15,7 @@ IntelAgent/PoCAgent/CriticAgent/ReflectionAgent 负责。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import ipaddress
 from typing import Any
 from urllib.parse import urlparse
 
@@ -120,19 +121,25 @@ class RequestExecutor:
         if candidate.get("request_steps"):
             return self._execute_steps(candidate["request_steps"], target_url, target_host, cve_id)
 
-        if candidate.get("nuclei_yaml"):
-            result = send_poc_and_capture(
-                nuclei_yaml=candidate["nuclei_yaml"],
-                target_url=target_url,
-                cve_id=cve_id,
-            )
-            return _with_executor_metadata(result, self.name, target_url, target_host, step_results=[])
+        # YAML 候选也先转 Raw HTTP，统一走旧版 /api/http2pcap，不再用 /api/nuclei-poc。
+        raw_http = str(candidate.get("raw_http") or "").strip()
+        nuclei_yaml = str(candidate.get("nuclei_yaml") or "").strip()
+        if nuclei_yaml and not raw_http:
+            from cve_hunter.poc_parser import nuclei_yaml_to_raw_http
 
-        raw_http = candidate.get("raw_http", "")
+            raw_http = nuclei_yaml_to_raw_http(nuclei_yaml)
         if raw_http:
             raw_http = _prepare_raw_http(raw_http, target_host)
-            result = send_poc_and_capture(raw_http=raw_http, cve_id=cve_id)
+            result = send_poc_and_capture(raw_http=raw_http, target_url=target_url, cve_id=cve_id)
             return _with_executor_metadata(result, self.name, target_url, target_host, request_raw=raw_http, step_results=[])
+        if nuclei_yaml:
+            return _with_executor_metadata(
+                {"success": False, "error": "无法从 nuclei YAML 提取 Raw HTTP", "error_type": "invalid_request"},
+                self.name,
+                target_url,
+                target_host,
+                step_results=[],
+            )
 
         return _with_executor_metadata(
             {"success": False, "error": "候选缺少 raw_http、nuclei_yaml、request_steps 或 execution_spec"},
@@ -145,23 +152,38 @@ class RequestExecutor:
     def _execute_steps(self, steps: list[dict[str, Any]], target_url: str, target_host: str, cve_id: str) -> dict[str, Any]:
         step_results = []
         last_result: dict[str, Any] = {"success": False, "error": "request_steps 为空"}
+        cookies: list[str] = []
         for index, step in enumerate(steps, start=1):
             raw_http = _prepare_raw_http(
                 str(step.get("raw_http") or step.get("request") or ""),
                 target_host,
             )
+            if cookies and raw_http and "\ncookie:" not in raw_http.lower():
+                raw_http = _insert_request_header(raw_http, f"Cookie: {'; '.join(cookies)}")
             nuclei_yaml = str(step.get("nuclei_yaml") or "")
-            if nuclei_yaml:
-                result = send_poc_and_capture(nuclei_yaml=nuclei_yaml, target_url=target_url, cve_id=cve_id)
-            elif raw_http:
-                result = send_poc_and_capture(raw_http=raw_http, cve_id=cve_id)
+            if not raw_http and nuclei_yaml:
+                from cve_hunter.poc_parser import nuclei_yaml_to_raw_http
+
+                raw_http = _prepare_raw_http(nuclei_yaml_to_raw_http(nuclei_yaml), target_host)
+            if raw_http:
+                result = send_poc_and_capture(raw_http=raw_http, target_url=target_url, cve_id=cve_id)
             else:
                 result = {"success": False, "error": f"第 {index} 步缺少可执行请求"}
             result = _with_executor_metadata(result, self.name, target_url, target_host, request_raw=raw_http, step_index=index)
             step_results.append(result)
             last_result = result
+            for cookie in _response_cookies(result.get("headers"), result.get("body", "")):
+                if cookie not in cookies:
+                    cookies.append(cookie)
             if not result.get("success"):
                 break
+        combined_matches: list[dict[str, Any]] = []
+        for item in step_results:
+            for match in item.get("ips_matches") or []:
+                if match not in combined_matches:
+                    combined_matches.append(match)
+        if combined_matches:
+            last_result["ips_matches"] = combined_matches
         return _with_executor_metadata(last_result, self.name, target_url, target_host, step_results=step_results)
 
 
@@ -386,6 +408,8 @@ def _with_executor_metadata(
     enriched["target_host"] = target_host
     if step_index is not None:
         enriched["step_index"] = step_index
+    if step_results is not None:
+        enriched["step_results"] = step_results
     return enriched
 
 
@@ -403,7 +427,7 @@ def _target_host_from_url(url: str) -> str:
     return parsed.netloc or parsed.path or effective_target_ip()
 
 
-def _prepare_raw_http(raw_http: str, target_host: str) -> str:
+def _prepare_raw_http(raw_http: str, target_host: str, target_url: str = "") -> str:
     """Replace TARGET_HOST placeholders and inject Host when missing.
 
     Some LLM/reference candidates omit the Host header. The local http2pcap
@@ -421,12 +445,48 @@ def _prepare_raw_http(raw_http: str, target_host: str) -> str:
     if not host:
         return normalized.replace("\n", "\r\n") if "\r\n" not in text else text
 
-    # Already has a Host header (after placeholder replacement).
+    # Preserve explicit domain/port Host values. For an IP-only Host that
+    # targets the current destination, restore the configured service port;
+    # otherwise http2pcap may send to port 80 even when TARGET_PORT is 7788.
+    target_netloc = str(target_host or "").strip()
+    if not target_netloc and target_url:
+        target_netloc = _target_host_from_url(target_url)
+    target_name = target_netloc
+    if target_name.startswith("["):
+        target_name = target_name[1:].split("]", 1)[0]
+    elif ":" in target_name:
+        target_name = target_name.rsplit(":", 1)[0]
+    target_port = ""
+    if target_netloc.startswith("[") and "]" in target_netloc:
+        suffix = target_netloc.split("]", 1)[1]
+        target_port = suffix[1:] if suffix.startswith(":") else ""
+    elif ":" in target_netloc:
+        target_port = target_netloc.rsplit(":", 1)[1]
+
     for line in normalized.split("\n"):
         if line.lower().startswith("host:"):
             value = line.split(":", 1)[1].strip()
-            if value and "{{" not in value:
-                return normalized.replace("\n", "\r\n") if "\r\n" not in text else text
+            # Keep an explicit blank Host (e.g. IIS IP disclosure PoCs).
+            if not value:
+                return text if "\r\n" in text else normalized.replace("\n", "\r\n")
+            if "{{" not in value:
+                host_name = value
+                host_port = ""
+                if host_name.startswith("[") and "]" in host_name:
+                    host_name, suffix = host_name.split("]", 1)
+                    host_name = host_name[1:]
+                    host_port = suffix[1:] if suffix.startswith(":") else ""
+                elif ":" in host_name:
+                    host_name, host_port = host_name.rsplit(":", 1)
+                try:
+                    same_ip = ipaddress.ip_address(host_name.strip("[]")) == ipaddress.ip_address(target_name.strip("[]"))
+                except ValueError:
+                    same_ip = False
+                if same_ip and not host_port and target_port:
+                    replacement = f"Host: {value}:{target_port}"
+                    normalized = normalized.replace(line, replacement, 1)
+                    return normalized.replace("\n", "\r\n")
+                return text if "\r\n" in text else normalized.replace("\n", "\r\n")
 
     # Insert Host after the request line, or at the top if malformed.
     lines = normalized.split("\n")
@@ -434,3 +494,26 @@ def _prepare_raw_http(raw_http: str, target_host: str) -> str:
     lines.insert(insert_at, f"Host: {host}")
     rebuilt = "\n".join(lines)
     return rebuilt.replace("\n", "\r\n")
+
+
+def _insert_request_header(raw_http: str, header: str) -> str:
+    lines = raw_http.replace("\r\n", "\n").split("\n")
+    if lines:
+        lines.insert(1, header)
+    return "\r\n".join(lines)
+
+
+def _response_cookies(headers: Any, body: Any) -> list[str]:
+    values: list[str] = []
+    if isinstance(headers, dict):
+        for key, value in headers.items():
+            if str(key).lower() == "set-cookie":
+                values.extend([str(value)])
+    elif isinstance(headers, list):
+        values.extend(str(item) for item in headers if "set-cookie:" in str(item).lower())
+    # The built-in sender only returns a body, but retaining a conservative
+    # Set-Cookie scan makes request_steps useful with lightweight executors.
+    for line in str(body or "").splitlines():
+        if line.lower().startswith("set-cookie:"):
+            values.append(line.split(":", 1)[1].strip())
+    return [value.split(";", 1)[0].strip() for value in values if value.strip()]

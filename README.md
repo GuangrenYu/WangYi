@@ -40,6 +40,56 @@ NVD References → Nuclei → Exploit-DB → imfht → 联网搜索+AI构造
 无论命中与否均继续获取新 PoC：联网模式继续参考分析等搜索流程，离线模式使用本地
 CVE 情报生成新候选；仍遵守请求预算、候选去重和仅生成 PoC 的运行限制。
 
+### 参考链接证据提取
+
+进入 `reference_analysis` 时，对所有 CVE 使用相同的增强抓取流程：直接读取 NVD
+References，再追踪相关来源；没有具体 HTTP 证据时主动并行查询 PoC-in-GitHub 公开索引、
+官方 Nuclei 模板和免费搜索。GitHub API 受限时尝试仓库页面的文件列表。
+GitHub 文件、Gist 和 Exploit-DB 优先读取原文。抓取只读取资料，不执行下载代码。
+现有快速批量模式仍会跳过远程参考分析；需要此流程时关闭快速批量模式，离线模式需明确允许参考链接。
+
+- `REFERENCE_CRAWL_BUDGET=20`：原有参考抓取之后的新增搜索与追踪总预算，上限 60 秒，设为 0 禁用新增联网流程。20 秒来自 16 个分层样本的真实 10/20/30/45 秒收益曲线，不能视为所有 CVE 的最佳时间。
+- 最多 4 个并发请求、16 个来源读取任务、2 层相关链接；单次请求最长 6 秒，不启动浏览器、不新增 LLM 调用。
+- `SEARXNG_URL`：可配置的免费聚合搜索入口，需要启用 JSON 输出；未配置时使用 DuckDuckGo HTML。遇到人机验证直接记为失败，不绕过验证。
+- `SEARCH_PAID_FALLBACK=true`：免费流程未找到 HTTP 请求类证据时才尝试付费搜索，仍共享总预算；配置 `BRAVE_SEARCH_API_KEY` 时优先 Brave，否则使用已配置的 Tavily。不配置任何付费 key 也能使用免费流程。
+- 独立读取进程到期即终止，保留已完成资料；缓存中已有的关联代码和说明直接复用。
+- `reference_contents[].poc_evidence` 保留 PoC 链接、完整代码块，以及版本、认证、依赖、配置、用法的原文引文与证据 URL。
+- `discovered_from` 保留发现来源；关键词提取的条件是待确认的引文，未提及的条件保持未知。
+- 缓存保留最多 24000 字符正文及独立代码块；模型输入最多 12000 字符，优先完整代码和条件，超长正文注明截断。
+
+离线评估两份结果表的设备级差异（包括只补齐其中一个设备的情况）：
+
+```bash
+.venv/bin/python scripts/evaluate_reference_evidence.py
+```
+
+脚本使用 `openpyxl`，只读取两份 Excel 和本地参考缓存，报告写入
+`output/reference_evidence_evaluation.json`。报告比较代码与条件在提示词中的保留程度，
+不会查询网络、调用 LLM、执行 PoC 或重新判定 IPS 命中。
+
+真实抓取与模板生成评估（使用配置的大模型 API，会消耗额度，仍不执行模板）：
+
+```bash
+.venv/bin/python scripts/benchmark_reference_generation.py --output output/reference_live --workers 8
+```
+
+该脚本对设备级差异 CVE 读取本地 CVE 情报，运行真实参考抓取，再调用模型生成模板。
+每个 CVE 单独保存原始参考内容、提示词、模型返回、候选 YAML 和静态证据检查。
+`report.json` 持续更新，可用同一输出目录恢复已完成任务；`--limit` 可先选少量样本。
+报告分开统计参考抓取与模型耗时、格式有效模板及原文证据支持模板。
+证据检查是来源 URL、逐字引文和路径的严格自动检查，不能代替人工语义审查或执行验证。
+
+比较不同新增时间预算（免费来源、冷抓取，不复用旧爬取缓存）：
+
+```bash
+.venv/bin/python scripts/benchmark_discovery_budget.py
+```
+
+脚本从上一轮 326 个结果中分层选取 16 个样本，记录每条资料的到达时间，比较
+10/20/30/45 秒对应的证据与真实模型产出。相同提示词复用一次模型结果，避免重复费用。
+优先保留最高证据支持模板产出，再选择保留至少 95% HTTP 证据覆盖的最短时间预算。
+这是小样本、单次 45 秒运行的时间前缀实验；不会重试验证码或执行模板。
+
 远程 PCAP 下载归档保留发包服务的原文件名（优先下载响应的 `Content-Disposition`，
 其次远程文件路径、下载 URL），不再统一改名为 `capture.pcap`；无法取得有效原名时才回退。
 
@@ -75,7 +125,8 @@ cp .env.example .env
 - `PCAP_OUTPUT_DIR` — 测试抓包归档根目录，默认 `data/cve/pcaps`，按 `YYYY-MM-DD` 分目录
 - `IPS_API_URL` — 防火墙/IPS 检测接口地址（http2pcap 服务启用 `check_ips` 时使用）
 - `WAYBACK_URL` — 外部 wayback-cve 服务地址
-- `TARGET_IP` — PoC 验证目标 IP
+- `TARGET_IP` — PoC 验证目标 IP，也可在 Web 输入 `IP:端口` 或 `http://IP:端口`
+- `TARGET_PORT` — `TARGET_IP` 未带端口时使用的默认端口；当前实验室目标为 `7788`
 
 **多靶场自动环境：**
 - `AUTO_ENV_ENABLED=false` — 默认只发现并记录环境候选，不自动启动

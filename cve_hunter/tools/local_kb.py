@@ -138,19 +138,48 @@ def _search_poc0911(cve_id: str) -> dict:
     if not re.fullmatch(r"CVE-\d{4}-\d+", cve_id, re.I):
         return {"found": False}
     directory = _kb_base() / "poc0911" / cve_id.upper()
+    requests: list[str] = []
+    source_path = ""
     for path in (directory / "poc.http", directory / "repro" / "trigger" / "poc.http"):
         try:
-            requests = _all_http_requests(path.read_text(encoding="utf-8-sig"))
+            found = _all_http_requests(path.read_text(encoding="utf-8-sig"))
         except (OSError, UnicodeError):
             continue
-        if requests:
-            return {
-                "found": True, "source": "local_kb_poc0911",
-                "kb_path": str(path), "raw_http": requests[0],
-                "raw_http_list": requests,
-                "reference_only": True,
-                "content": "poc0911 历史低质量 POC，仅供参考，不代表有效复现；必须继续构造新 POC。\n" + "\n".join(requests),
-            }
+        if found:
+            requests.extend(item for item in found if item not in requests)
+            source_path = str(path)
+    # Some historical runs kept additional request variants only in their
+    # result JSON. Read request fields exclusively; never import status,
+    # oracle, IPS or success flags from that file.
+    result_path = directory / "result.json"
+    try:
+        document = json.loads(result_path.read_text(encoding="utf-8-sig"))
+        def collect(value: object) -> None:
+            if isinstance(value, dict):
+                raw = str(value.get("raw_http") or "").strip()
+                if raw and raw not in requests:
+                    requests.append(_normalize_raw_http_host(raw))
+                for step in value.get("request_steps") or []:
+                    if isinstance(step, dict):
+                        raw_step = str(step.get("raw_http") or "").strip()
+                        if raw_step and raw_step not in requests:
+                            requests.append(_normalize_raw_http_host(raw_step))
+                for child in value.values():
+                    collect(child)
+            elif isinstance(value, list):
+                for child in value:
+                    collect(child)
+        collect(document)
+    except (OSError, UnicodeError, ValueError):
+        pass
+    if requests:
+        return {
+            "found": True, "source": "local_kb_poc0911",
+            "kb_path": source_path or str(result_path), "raw_http": requests[0],
+            "raw_http_list": requests[:20],
+            "reference_only": True,
+            "content": "poc0911 历史低质量 POC，仅供参考，不代表有效复现；必须继续构造新 POC。\n" + "\n".join(requests[:20]),
+        }
     return {"found": False}
 
 
@@ -165,6 +194,9 @@ def _parse_custom_kb(content: str, cve_id: str) -> dict:
     if requests:
         result["raw_http"] = requests[0]
         result["raw_http_list"] = requests
+        steps = _ordered_request_steps(content, requests)
+        if steps:
+            result["request_steps"] = steps
 
     # 提取 ```yaml ... ``` 代码块
     m = re.search(r"```(?:yaml|yml)?\s*\n(id:\s*[\s\S]*?)```", content)
@@ -196,6 +228,7 @@ def _search_vulhub_readme(cve_id: str) -> dict:
                 "kb_path": str(readme),
                 "raw_http": requests[0],
                 "raw_http_list": requests,
+                "request_steps": _ordered_request_steps(readme.read_text(encoding="utf-8", errors="ignore"), requests),
                 "yaml_content": "",
                 "references": [],
                 "content": "",
@@ -213,6 +246,23 @@ def _search_vulhub_readme(cve_id: str) -> dict:
             "content": "",
         }
     return {"found": False, "source": "local_kb_vulhub"}
+
+
+def _ordered_request_steps(content: str, requests: list[str]) -> list[dict]:
+    """保留本地文档明确表达的有序请求；不把普通候选列表串成多步攻击。"""
+    if len(requests) < 2:
+        return []
+    text = str(content or "")
+    # 这些词只作为文档内的顺序/会话证据，不从产品名或路径推断步骤。
+    ordered_markers = (
+        r"(?i)\bstep\s*[1-9]", r"(?i)\bstage\s*[1-9]",
+        r"步骤\s*[一二三四五12345]", r"(?i)\bfirst\b.*\bthen\b",
+        r"(?i)\bthen\b", r"登录", r"(?i)\blogin\b",
+        r"(?i)\bsession\b", r"(?i)\bcookie\b", r"先.{0,30}再",
+    )
+    if not any(re.search(marker, text, re.DOTALL) for marker in ordered_markers):
+        return []
+    return [{"raw_http": request, "step_index": index} for index, request in enumerate(requests, start=1)]
 
 
 def _vulhub_readmes_for_cve(cve_id: str) -> list[Path]:
