@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from cve_hunter.config import cfg
+from cve_hunter.tools.reference_evidence import MAX_CONTENT
 
 _CVE_RE = re.compile(r"CVE-(\d{4})-\d+", re.I)
 
@@ -30,7 +31,7 @@ def cache_path_for(cve_id: str) -> Path | None:
     return _cache_root() / year / f"{cve_id.upper()}.json"
 
 
-def load_reference_cache(cve_id: str) -> list[dict[str, str]]:
+def load_reference_cache(cve_id: str) -> list[dict[str, Any]]:
     path = cache_path_for(cve_id)
     if not path or not path.exists():
         return []
@@ -39,7 +40,7 @@ def load_reference_cache(cve_id: str) -> list[dict[str, str]]:
     except Exception:
         return []
     items = data.get("references") if isinstance(data, dict) else data
-    out: list[dict[str, str]] = []
+    out: list[dict[str, Any]] = []
     if not isinstance(items, list):
         return []
     for item in items:
@@ -49,13 +50,7 @@ def load_reference_cache(cve_id: str) -> list[dict[str, str]]:
         content = str(item.get("content") or "")
         if not url or not content.strip():
             continue
-        out.append(
-            {
-                "url": url,
-                "title": str(item.get("title") or ""),
-                "content": content,
-            }
-        )
+        out.append({**item, "url": url, "title": str(item.get("title") or ""), "content": content})
     return out
 
 
@@ -63,7 +58,7 @@ def save_reference_cache(cve_id: str, references: list[dict[str, Any]]) -> Path 
     path = cache_path_for(cve_id)
     if not path:
         return None
-    cleaned: list[dict[str, str]] = []
+    cleaned: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in references:
         if not isinstance(item, dict):
@@ -73,13 +68,7 @@ def save_reference_cache(cve_id: str, references: list[dict[str, Any]]) -> Path 
         if not url or not content.strip() or url in seen:
             continue
         seen.add(url)
-        cleaned.append(
-            {
-                "url": url,
-                "title": str(item.get("title") or ""),
-                "content": content[:8000],
-            }
-        )
+        cleaned.append({**item, "url": url, "title": str(item.get("title") or ""), "content": content[:MAX_CONTENT]})
     if not cleaned:
         return None
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -92,11 +81,11 @@ def save_reference_cache(cve_id: str, references: list[dict[str, Any]]) -> Path 
 
 
 def merge_reference_contents(
-    cached: list[dict[str, str]],
-    fetched: list[dict[str, str]],
-) -> list[dict[str, str]]:
+    cached: list[dict[str, Any]],
+    fetched: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     """Prefer longer content for the same URL; keep stable order cached-first."""
-    by_url: dict[str, dict[str, str]] = {}
+    by_url: dict[str, dict[str, Any]] = {}
     order: list[str] = []
     for item in list(cached) + list(fetched):
         url = str(item.get("url") or "").strip()
@@ -106,15 +95,13 @@ def merge_reference_contents(
         if not content.strip():
             continue
         if url not in by_url:
-            by_url[url] = {
-                "url": url,
-                "title": str(item.get("title") or ""),
-                "content": content,
-            }
+            by_url[url] = {**item, "url": url, "title": str(item.get("title") or ""), "content": content}
             order.append(url)
             continue
         if len(content) > len(by_url[url].get("content") or ""):
-            by_url[url]["content"] = content
-            if item.get("title"):
-                by_url[url]["title"] = str(item.get("title") or "")
+            by_url[url].update(item)
+        else:
+            for key, value in item.items():
+                if key not in {"url", "title", "content"}:
+                    by_url[url][key] = value
     return [by_url[url] for url in order]

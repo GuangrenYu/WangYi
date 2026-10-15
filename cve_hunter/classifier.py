@@ -92,7 +92,7 @@ def classify_http_vuln_from_info(
     )
 
     try:
-        result = invoke_llm(prompt)
+        result = invoke_llm(prompt, purpose="vulnerability_classification")
         cleaned = re.sub(r"```json\s*|\s*```", "", result).strip()
         data = json.loads(cleaned)
         is_http = bool(data.get("is_http_vuln", True))

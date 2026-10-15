@@ -162,6 +162,36 @@ class HttpSenderRoutingTests(unittest.TestCase):
         remote.assert_called_once()
         builtin.assert_not_called()
 
+    def test_nuclei_yaml_is_converted_to_raw_http2pcap(self):
+        yaml_text = """
+id: CVE-2020-0001
+info:
+  name: t
+  author: cve-hunter
+  severity: info
+http:
+  - method: GET
+    path:
+      - "{{BaseURL}}/vuln"
+""".strip()
+        fake_cfg = SimpleNamespace(http2pcap_url="http://127.0.0.1:3012")
+        with (
+            patch.object(http_sender, "cfg", fake_cfg),
+            patch.object(http_sender, "_send_via_http2pcap", return_value={"success": True}) as remote,
+            patch.object(http_sender, "_send_via_http2pcap_nuclei") as nuclei,
+            patch.object(http_sender, "_send_builtin") as builtin,
+        ):
+            result = http_sender.send_poc_and_capture(nuclei_yaml=yaml_text, cve_id="CVE-2020-0001")
+
+        self.assertTrue(result["success"])
+        self.assertTrue(result.get("yaml_to_raw"))
+        remote.assert_called_once()
+        sent_raw = remote.call_args.args[0]
+        self.assertIn("GET /vuln HTTP/1.1", sent_raw)
+        self.assertIn("Host: {{TARGET_HOST}}", sent_raw)
+        nuclei.assert_not_called()
+        builtin.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,11 +7,65 @@ from __future__ import annotations
 
 import json
 import re
+import hashlib
+import time
+from contextlib import contextmanager
+from contextvars import ContextVar
+from pathlib import Path
 
 from cve_hunter.config import cfg
 from cve_hunter.runtime import is_local_only
 
 _llm_cache = {}
+_run_usage = ContextVar("llm_run_usage", default=None)
+
+
+@contextmanager
+def llm_run_scope(directory: Path):
+    """Keep memoization, call budget and a content-free ledger isolated per CVE."""
+    ledger = {"path": directory / "llm_usage.jsonl", "calls": 0, "cache": {}, "events": []}
+    token = _run_usage.set(ledger)
+    try:
+        yield
+    finally:
+        _run_usage.reset(token)
+
+
+def _record_usage(ledger, event):
+    if ledger is not None:
+        ledger["events"].append(event)
+        try:
+            ledger["path"].parent.mkdir(parents=True, exist_ok=True)
+            with ledger["path"].open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(event, ensure_ascii=False) + "\n")
+        except OSError:
+            # Usage logging must never discard an otherwise valid PoC result.
+            pass
+
+
+def llm_usage_summary() -> dict:
+    ledger = _run_usage.get()
+    if ledger is None:
+        return {}
+    by_purpose = {}
+    for event in ledger["events"]:
+        bucket = by_purpose.setdefault(event.get("purpose") or "unspecified", {
+            "calls": 0, "cache_hits": 0, "reported_tokens": 0, "errors": 0,
+        })
+        if event.get("status") == "cache_hit":
+            bucket["cache_hits"] += 1
+        elif event.get("status") in {"success", "error"}:
+            bucket["calls"] += 1
+        if event.get("status") == "error":
+            bucket["errors"] += 1
+        bucket["reported_tokens"] += event.get("total_tokens") or 0
+    return {
+        "calls": ledger["calls"],
+        "cache_hits": sum(event["status"] == "cache_hit" for event in ledger["events"]),
+        "reported_tokens": sum(event.get("total_tokens") or 0 for event in ledger["events"]),
+        "usage_incomplete": any(event.get("total_tokens") is None for event in ledger["events"]),
+        "by_purpose": by_purpose,
+    }
 
 
 def _is_llm_available() -> bool:
@@ -25,7 +79,9 @@ def get_llm(*, model: str | None = None, temperature: float = 0.2, max_tokens: i
             return None
         import httpx as _httpx
         from langchain_openai import ChatOpenAI
-        http_client = _httpx.Client(proxy=cfg.httpx_proxy, trust_env=False)
+        # LLM 网关直连：不要走系统/Clash 代理。代理波动会导致 Connection error，
+        # 而 tinysnow 等国内可达网关直连更稳；搜索(Tavily)仍可单独走 cfg.httpx_proxy。
+        http_client = _httpx.Client(proxy=None, trust_env=False)
         _llm_cache[cache_key] = ChatOpenAI(
             model=cache_key[0],
             api_key=cfg.llm_api_key,
@@ -33,15 +89,51 @@ def get_llm(*, model: str | None = None, temperature: float = 0.2, max_tokens: i
             temperature=temperature,
             max_tokens=max_tokens,
             http_client=http_client,
+            max_retries=0,
+            timeout=getattr(cfg, "llm_timeout", 60),
         )
     return _llm_cache[cache_key]
 
 
-def invoke_llm(prompt: str, *, model: str | None = None, temperature: float = 0.2, max_tokens: int = 4096) -> str:
+def invoke_llm(prompt: str, *, model: str | None = None, temperature: float = 0.2, max_tokens: int = 4096, purpose: str = "unspecified") -> str:
     """调用 LLM 并返回纯文本结果。无 API Key 时使用规则降级。"""
     llm = get_llm(model=model, temperature=temperature, max_tokens=max_tokens)
     if llm is not None:
-        resp = llm.invoke(prompt)
+        ledger = _run_usage.get()
+        key = hashlib.sha256(json.dumps([model or cfg.llm_model, temperature, max_tokens, prompt]).encode()).hexdigest()
+        event = {"purpose": purpose, "model": model or cfg.llm_model,
+                 "prompt_sha256": key, "prompt_chars": len(prompt)}
+        if ledger is not None and key in ledger["cache"]:
+            _record_usage(ledger, {**event, "status": "cache_hit", "total_tokens": 0})
+            return ledger["cache"][key]
+        limit = getattr(cfg, "llm_max_calls_per_cve", 12)
+        if ledger is not None and limit > 0 and ledger["calls"] >= limit:
+            _record_usage(ledger, {**event, "status": "budget_exhausted", "total_tokens": 0})
+            raise RuntimeError("LLM call budget exhausted for this CVE")
+        if ledger is not None:
+            ledger["calls"] += 1
+        started = time.monotonic()
+        try:
+            resp = llm.invoke(prompt)
+        except Exception as exc:
+            _record_usage(ledger, {**event, "status": "error", "error_type": type(exc).__name__,
+                                   "elapsed_sec": round(time.monotonic() - started, 3), "total_tokens": None})
+            raise
+        usage = getattr(resp, "usage_metadata", None) or {}
+        metadata = getattr(resp, "response_metadata", None) or {}
+        usage = usage or metadata.get("token_usage", {})
+        input_tokens = usage.get("input_tokens", usage.get("prompt_tokens"))
+        output_tokens = usage.get("output_tokens", usage.get("completion_tokens"))
+        total_tokens = usage.get("total_tokens")
+        if total_tokens is None and input_tokens is not None and output_tokens is not None:
+            total_tokens = input_tokens + output_tokens
+        _record_usage(ledger, {**event, "status": "success",
+            "input_tokens": input_tokens,
+            "output_tokens": output_tokens,
+            "total_tokens": total_tokens,
+            "elapsed_sec": round(time.monotonic() - started, 3)})
+        if ledger is not None:
+            ledger["cache"][key] = resp.content
         return resp.content
 
     return _fallback_rule_based(prompt)

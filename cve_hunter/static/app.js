@@ -1,6 +1,8 @@
-const state={tasks:new Map(),sources:new Map()};
+const state={tasks:new Map(),sources:new Map(),cursors:new Map(),reconnects:new Map()};
 let selectedFiles=[];
 let cveTotal=0,fileRevision=0,countingFiles=false;
+let renderTimer=0;
+const taskNodes=new Map();
 const active=status=>["queued","running","stopping"].includes(status);
 const $=s=>document.querySelector(s);
 const labels={queued:'排队中',running:'运行中',completed:'已完成',success:'成功',failed:'失败',interrupted:'已中断',stopping:'终止中',cancelled:'已终止'};
@@ -26,23 +28,98 @@ async function renderFiles(files){
   }
 
 }
-function modeLabel(mode){return mode==='full'?'完整流程':mode==='poc'?'仅生成 PoC':mode==='analysis'?'仅分析':'仅环境'}
+function modeLabel(mode){return mode==='full'?'完整流程':mode==='poc'?'仅生成 PoC':mode==='analysis'?'仅分析':mode==='yaml'?'只跑 YAML':'仅环境'}
+function itemHtml(item,taskId){
+  const status=item.status||'';
+  const phase=labels[status]==='终止中'?'终止中':item.phase_label||labels[status]||item.phase||'等待';
+  const cancel=['queued','running'].includes(status)?`<button type="button" class="secondary" data-cancel-task="${escapeHtml(taskId)}" data-cancel-cve="${escapeHtml(item.cve_id)}">终止</button>`:'';
+  const usage=item.result_summary?.llm_usage;
+  const usageText=usage&&usage.calls!==undefined?`<div class="item-msg">模型调用 ${escapeHtml(usage.calls)} 次 · ${usage.usage_incomplete?'已报告 ':''}${escapeHtml(usage.reported_tokens)} tokens${usage.usage_incomplete?'（部分用量未返回）':''} · 复用 ${escapeHtml(usage.cache_hits)} 次</div>`:'';
+  return `<div class="item ${escapeHtml(status)}" data-item-cve="${escapeHtml(item.cve_id)}"><div class="item-row"><span class="item-cve">${escapeHtml(item.cve_id)}</span><span class="item-phase">${escapeHtml(phase)}</span>${cancel}</div><div class="item-msg">${escapeHtml(item.message||'')}</div>${usageText}</div>`;
+}
 function taskCard(task){
   const done=task.completed||0,total=task.total||1;
-  const items=Object.values(task.items||{}).map(item=>`<div class="item ${escapeHtml(item.status||'')}"><div class="item-row"><span class="item-cve">${escapeHtml(item.cve_id)}</span><span class="item-phase">${escapeHtml(labels[item.status]==='终止中'?'终止中':item.phase_label||labels[item.status]||item.phase||'等待')}</span>${['queued','running'].includes(item.status)?`<button type="button" class="secondary" data-cancel-task="${escapeHtml(task.id)}" data-cancel-cve="${escapeHtml(item.cve_id)}">终止</button>`:''}</div><div class="item-msg">${escapeHtml(item.message||'')}</div></div>`).join('');
+  const items=Object.values(task.items||{}).map(item=>itemHtml(item,task.id)).join('');
   const statusClass=escapeHtml(task.status||'');
-  return `<article class="task"><div class="task-head"><div><div class="task-name">任务 ${escapeHtml(task.id)}</div><div class="task-meta">${modeLabel(task.mode)} · ${escapeHtml(task.concurrency)} 线程 · ${task.docker_enabled?'Docker 开启':'Docker 关闭'} · ${escapeHtml(task.target_ip||'默认目标')} · ${task.local_only?'本地资料':'允许联网'}</div></div><span class="task-status ${statusClass}">${escapeHtml(labels[task.status]||task.status)}</span>${["queued","running"].includes(task.status)?`<button type="button" class="secondary" data-cancel-task="${escapeHtml(task.id)}">终止任务</button>`:""}</div><div class="task-bar"><i style="width:${Math.round(done/total*100)}%"></i></div><div class="task-meta">${done}/${total} 个 CVE 已结束 · ${escapeHtml(task.selection?.selected_total||task.total)} 条已选</div><div class="task-items">${items}</div></article>`;
+  return `<article class="task" data-task-id="${escapeHtml(task.id)}"><div class="task-head"><div><div class="task-name">任务 ${escapeHtml(task.id)}</div><div class="task-meta">${modeLabel(task.mode)} · ${escapeHtml(task.concurrency)} 线程 · ${task.fast_mode?'快速批量 · ':''}${task.docker_enabled?'Docker 开启':'Docker 关闭'} · ${escapeHtml(task.target_ip||'默认目标')} · ${task.local_only?'本地资料':'允许联网'}</div></div><span class="task-status ${statusClass}">${escapeHtml(labels[task.status]||task.status)}</span>${["queued","running"].includes(task.status)?`<button type="button" class="secondary" data-cancel-task="${escapeHtml(task.id)}">终止任务</button>`:""}</div><div class="task-bar"><i style="width:${Math.round(done/total*100)}%"></i></div><div class="task-meta task-progress-meta">${done}/${total} 个 CVE 已结束 · ${escapeHtml(task.selection?.selected_total||task.total)} 条已选</div><div class="task-items">${items}</div></article>`;
 }
-function render(){
+function updateTaskSummary(task,node){
+  if(!node)return;
+  const done=task.completed||0,total=task.total||1;
+  const bar=node.querySelector('.task-bar i');
+  if(bar)bar.style.width=`${Math.round(done/total*100)}%`;
+  const progress=node.querySelector('.task-progress-meta');
+  if(progress)progress.textContent=`${done}/${total} 个 CVE 已结束 · ${task.selection?.selected_total||task.total} 条已选`;
+  const status=node.querySelector('.task-status');
+  if(status){status.className=`task-status ${escapeHtml(task.status||'')}`;status.textContent=labels[task.status]||task.status||'';}
+}
+function updateItemNode(taskId,item){
+  const node=taskNodes.get(taskId); if(!node)return;
+  const items=node.querySelector('.task-items'); if(!items)return;
+  const current=[...items.querySelectorAll('.item')].find(element=>element.dataset.itemCve===item.cve_id);
+  if(current)current.outerHTML=itemHtml(item,taskId);
+  else items.insertAdjacentHTML('beforeend',itemHtml(item,taskId));
+}
+function replaceTaskNode(task){
+  const old=taskNodes.get(task.id); if(!old)return;
+  const selector=`article[data-task-id="${task.id}"]`;
+  const parent=old.parentElement;
+  old.outerHTML=taskCard(task);
+  const replacement=(parent&&parent.querySelector(selector))||document.querySelector(selector);
+  if(replacement)taskNodes.set(task.id,replacement);else taskNodes.delete(task.id);
+}
+function renderNow(){
   const list=$('#task-list'); const all=[...state.tasks.values()].sort((a,b)=>String(b.created_at).localeCompare(String(a.created_at)));
-  list.innerHTML=all.filter(task=>active(task.status)).map(taskCard).join('');
+  const activeTasks=all.filter(task=>active(task.status));
+  const activeIds=new Set(activeTasks.map(task=>task.id));
+  for(const task of activeTasks){
+    let node=taskNodes.get(task.id);
+    if(!node){
+      list.insertAdjacentHTML('beforeend',taskCard(task));
+      node=list.querySelector(`article[data-task-id="${task.id}"]`);
+      if(node)taskNodes.set(task.id,node);
+    }
+    updateTaskSummary(task,node);
+  }
+  for(const [id,node] of taskNodes){
+    if(!activeIds.has(id)){node.remove();taskNodes.delete(id);}
+  }
   $('#empty-state').style.display=all.some(task=>active(task.status))?'none':'flex';
   const history=$('#history-list');
   history.innerHTML=all.filter(task=>!active(task.status)).slice(0,5).map(task=>`<div class="history-row"><div><b>${escapeHtml(task.id)}</b><span>${modeLabel(task.mode)} · ${escapeHtml(task.total)} 条</span></div><div><span class="task-status ${escapeHtml(task.status||'')}">${escapeHtml(labels[task.status]||task.status)}</span><small>${escapeHtml(String(task.created_at||'').replace('T',' ').slice(0,16))}</small></div></div>`).join('')||'<div class="history-empty">暂无历史任务</div>';
   let running=all.filter(task=>task.status==='running').length; $('#task-count').textContent=all.length; $('#running-count').textContent=running;
 }
-async function loadTasks(){try{const res=await fetch('/api/tasks'); const tasks=await res.json(); tasks.forEach(t=>state.tasks.set(t.id,t)); render(); tasks.filter(t=>active(t.status)).forEach(connect)}catch(e){$('#health-text').textContent='服务不可用'; $('#health-dot').style.background='#b94a4a'}}
-function connect(task){if(state.sources.has(task.id))return; const source=new EventSource(`/api/tasks/${task.id}/events`); state.sources.set(task.id,source); source.onmessage=e=>{const event=JSON.parse(e.data); if(event.task)state.tasks.set(task.id,event.task); if(event.event==='item'){const t=state.tasks.get(task.id); if(t&&t.items[event.cve_id])Object.assign(t.items[event.cve_id],event)} if(event.event==='progress'){const t=state.tasks.get(task.id); if(t)t.completed=event.completed} if(event.event==='status'){const t=state.tasks.get(task.id); if(t)t.status=event.status} render(); if(!active(state.tasks.get(task.id)?.status)){source.close();state.sources.delete(task.id)}}; source.onerror=()=>{source.close();state.sources.delete(task.id)} }
+function scheduleRender(){if(renderTimer)return;renderTimer=setTimeout(()=>{renderTimer=0;renderNow()},120)}
+function render(){scheduleRender()}
+async function loadTasks(){try{const res=await fetch('/api/tasks'); const tasks=await res.json(); tasks.forEach(t=>state.tasks.set(t.id,t)); renderNow(); tasks.filter(t=>active(t.status)).forEach(connect)}catch(e){$('#health-text').textContent='服务不可用'; $('#health-dot').style.background='#b94a4a'}}
+function connect(task,since=0){
+  if(state.sources.has(task.id))return;
+  const cursor=state.cursors.get(task.id)||since||0;
+  const suffix=cursor?`?since=${encodeURIComponent(cursor)}`:'';
+  const source=new EventSource(`/api/tasks/${encodeURIComponent(task.id)}/events${suffix}`);
+  state.sources.set(task.id,source);
+  source.onmessage=e=>{
+    let event;try{event=JSON.parse(e.data)}catch(error){return}
+    const seq=Number(e.lastEventId||event.seq||0);if(seq)state.cursors.set(task.id,seq);
+    const current=state.tasks.get(task.id);
+    if(event.event==='task'&&event.task){state.tasks.set(task.id,event.task);replaceTaskNode(event.task);}
+    else if(current&&event.event==='item'&&current.items[event.cve_id]){Object.assign(current.items[event.cve_id],event);updateItemNode(task.id,current.items[event.cve_id]);}
+    else if(current&&event.event==='items'){for(const item of event.items||[]){if(current.items[item.cve_id]){Object.assign(current.items[item.cve_id],item);updateItemNode(task.id,current.items[item.cve_id]);}}}
+    else if(current&&event.event==='progress'){if(event.completed!==undefined)current.completed=event.completed;}
+    else if(current&&event.event==='status'){current.status=event.status;if(event.completed!==undefined)current.completed=event.completed;}
+    const updated=state.tasks.get(task.id);if(updated)updateTaskSummary(updated,taskNodes.get(task.id));
+    scheduleRender();
+    if(!active(updated?.status)){source.close();state.sources.delete(task.id);const timer=state.reconnects.get(task.id);if(timer){clearTimeout(timer);state.reconnects.delete(task.id);}}
+  };
+  source.onerror=()=>{
+    source.close();state.sources.delete(task.id);
+    const updated=state.tasks.get(task.id);
+    if(active(updated?.status)&&!state.reconnects.has(task.id)){
+      const timer=setTimeout(()=>{state.reconnects.delete(task.id);connect(updated,state.cursors.get(task.id)||0)},1000);
+      state.reconnects.set(task.id,timer);
+    }
+  };
+}
 $('#file-input').addEventListener('change',e=>{selectedFiles=[...e.target.files];renderFiles(selectedFiles);e.target.value=''});
 $('#folder-button').addEventListener('click',()=>$('#folder-input').click());
 $('#folder-input').addEventListener('change',e=>{selectedFiles=[...e.target.files];renderFiles(selectedFiles);e.target.value=''});
@@ -99,7 +176,7 @@ $('#task-list').addEventListener('click',async event=>{
 });
 
 document.querySelectorAll('.mode-card input').forEach(input=>input.addEventListener('change',()=>{document.querySelectorAll('.mode-card').forEach(card=>card.classList.toggle('active',card.querySelector('input').checked))}));
-$('#task-form').addEventListener('submit',async e=>{e.preventDefault(); const files=selectedFiles.slice(); if(countingFiles)return; const typed=$('#cve-input').value.trim(); if(!files.length&&!typed){alert('请先选择文件、文件夹或输入 CVE');return} const form=new FormData(); files.forEach(file=>form.append('files',file,file.webkitRelativePath||file.name)); form.append('cve_text',typed); form.append('mode',document.querySelector('input[name=mode]:checked').value); form.append('concurrency',$('#concurrency').value); form.append('docker_enabled',$('#docker-enabled').checked?'true':'false'); form.append('target_ip',$('#target-ip').value.trim()); form.append('local_only',String($('#local-only').checked)); form.append('allow_reference_links',String($('#allow-reference-links').checked)); form.append('environment_discovery',String($('#environment-discovery').checked)); form.append('output_dir',$('#output-dir').value.trim()); form.append('range_mode',rangeMode.value); form.append('range_count',rangeCount.value); form.append('range_start',$('#range-start').value); form.append('range_end',$('#range-end').value); const button=e.target.querySelector('button'); button.disabled=true; button.textContent='创建中…'; try{const res=await fetch('/api/tasks',{method:'POST',body:form}); const task=await res.json(); if(!res.ok)throw new Error(task.detail||'创建失败'); state.tasks.set(task.id,task); render(); connect(task); e.target.reset(); updateOptions(); document.querySelectorAll('.mode-card').forEach(card=>card.classList.toggle('active',card.querySelector('input').checked)); selectedFiles=[]; renderFiles([]);rangeMode.value='all';updateRangeControls()}catch(err){alert(err.message)}finally{button.disabled=false;button.innerHTML='<span>▶</span> 创建并运行任务'}});
+$('#task-form').addEventListener('submit',async e=>{e.preventDefault(); const files=selectedFiles.slice(); if(countingFiles)return; const typed=$('#cve-input').value.trim(); if(!files.length&&!typed){alert('请先选择文件、文件夹或输入 CVE');return} const form=new FormData(); files.forEach(file=>form.append('files',file,file.webkitRelativePath||file.name)); form.append('cve_text',typed); form.append('mode',document.querySelector('input[name=mode]:checked').value); form.append('concurrency',$('#concurrency').value); form.append('docker_enabled',$('#docker-enabled').checked?'true':'false'); form.append('target_ip',$('#target-ip').value.trim()); form.append('local_only',String($('#local-only').checked)); form.append('fast_mode',String($('#fast-mode').checked)); form.append('allow_reference_links',String($('#allow-reference-links').checked)); form.append('environment_discovery',String($('#environment-discovery').checked)); form.append('output_dir',$('#output-dir').value.trim()); form.append('range_mode',rangeMode.value); form.append('range_count',rangeCount.value); form.append('range_start',$('#range-start').value); form.append('range_end',$('#range-end').value); const button=e.target.querySelector('button'); button.disabled=true; button.textContent='创建中…'; try{const res=await fetch('/api/tasks',{method:'POST',body:form}); const task=await res.json(); if(!res.ok)throw new Error(task.detail||'创建失败'); state.tasks.set(task.id,task); render(); connect(task); e.target.reset(); $('#fast-mode').checked=false; $('#allow-reference-links').checked=true; updateOptions(); document.querySelectorAll('.mode-card').forEach(card=>card.classList.toggle('active',card.querySelector('input').checked)); selectedFiles=[]; renderFiles([]);rangeMode.value='all';updateRangeControls()}catch(err){alert(err.message)}finally{button.disabled=false;button.innerHTML='<span>▶</span> 创建并运行任务'}});
 fetch('/api/health').then(r=>r.json()).then(data=>{$('#target-ip').placeholder=data.target_ip||'服务端默认目标';$('#health-dot').style.background='#70c7a4';$('#health-text').textContent=`在线 · ${data.docker_default?'Docker 默认开启':'Docker 默认关闭'}`}).catch(()=>{}); loadTasks();
 
 function kbCard(title, value, detail, tone=''){

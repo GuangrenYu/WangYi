@@ -40,6 +40,27 @@ class ProtocolGateTests(unittest.TestCase):
         state = CVEState(is_http_vuln=False, protocol="unsupported", local_container_mode=False)
         self.assertEqual(route_after_type_check(state), "generate_report")
 
+    def test_infer_jackson_as_http_when_llm_says_no(self):
+        desc = (
+            "FasterXML jackson-databind mishandles interaction between "
+            "serialization gadgets and typing, leading to remote code execution."
+        )
+        protocol = infer_protocol(
+            is_http_vuln=False,
+            vuln_type="反序列化漏洞",
+            description=desc,
+        )
+        self.assertEqual(protocol, PROTOCOL_HTTP)
+        self.assertTrue(_is_runnable_protocol(protocol, False))
+
+    def test_infer_defaults_to_http_when_uncertain(self):
+        protocol = infer_protocol(
+            is_http_vuln=False,
+            vuln_type="未知",
+            description="An issue was found in example software package.",
+        )
+        self.assertEqual(protocol, PROTOCOL_HTTP)
+
     def test_vuln_type_check_does_not_mark_webnms_unsupported(self):
         desc = (
             "ZOHO WebNMS Framework 5.2 and 5.2 SP1 use a weak obfuscation algorithm "

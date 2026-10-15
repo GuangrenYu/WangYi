@@ -1,4 +1,9 @@
-"""PoC 多源检索模块：nuclei / exploit-db / imfht。"""
+"""PoC 多源检索模块。
+
+除了 Nuclei、GitHub、Exploit-DB 和 IMFHT，联网搜索阶段还会定向覆盖
+Packet Storm、WPScan/WordPress Trac、SourceCodester、VulDB/Vulners 以及
+厂商公告；这些站点的正文仍必须经过请求证据提取，不能把摘要直接当 PoC。
+"""
 
 from __future__ import annotations
 
@@ -8,6 +13,37 @@ import httpx
 import yaml
 
 from cve_hunter.config import cfg
+
+
+def _source_timeout() -> int:
+    """Return the bounded timeout for non-target PoC providers.
+
+    ``SimpleNamespace`` config substitutes used by tests may only expose the
+    legacy ``request_timeout`` field, so both names are intentionally optional.
+    """
+    for value in (
+        getattr(cfg, "web_source_timeout", None),
+        getattr(cfg, "request_timeout", 30),
+    ):
+        try:
+            return max(3, int(value))
+        except (TypeError, ValueError):
+            continue
+    return 30
+
+
+def _proxy():
+    return getattr(cfg, "httpx_proxy", None)
+
+
+ADDITIONAL_REFERENCE_SOURCES = (
+    "packetstormsecurity.com",
+    "wpscan.com",
+    "wordpress.org/trac",
+    "sourcecodester.com",
+    "vuldb.com",
+    "vulners.com",
+)
 
 
 # ── Nuclei 官方 PoC 库 ──
@@ -27,7 +63,7 @@ def _fetch_nuclei_content(path: str) -> str:
     ]
     for url in endpoints:
         try:
-            resp = httpx.get(url, timeout=cfg.request_timeout, follow_redirects=True, proxy=cfg.httpx_proxy)
+            resp = httpx.get(url, timeout=_source_timeout(), follow_redirects=True, proxy=_proxy())
             if resp.status_code == 200 and resp.text.strip():
                 return resp.text
             if resp.status_code == 404:
@@ -40,9 +76,9 @@ def _fetch_nuclei_content(path: str) -> str:
         resp = httpx.get(
             f"{_NUCLEI_API}/{path}",
             headers={"Accept": "application/vnd.github.v3+json"},
-            timeout=cfg.request_timeout,
+            timeout=_source_timeout(),
             follow_redirects=True,
-            proxy=cfg.httpx_proxy,
+            proxy=_proxy(),
         )
         if resp.status_code == 200:
             import base64
@@ -107,7 +143,7 @@ def search_poc_in_github(cve_id: str) -> dict:
     url = f"{_POC_IN_GITHUB}/{year}/{cve_upper}.json"
 
     try:
-        resp = httpx.get(url, timeout=cfg.request_timeout, follow_redirects=True, proxy=cfg.httpx_proxy)
+        resp = httpx.get(url, timeout=_source_timeout(), follow_redirects=True, proxy=_proxy())
         if resp.status_code != 200:
             return {"found": False, "source": "poc-in-github"}
         data = resp.json()
@@ -139,6 +175,7 @@ _POC_REPO_FILES = [
     "poc.py", "exploit.py", "exp.py", "poc.rb", "exploit.rb",
     "poc.sh", "exploit.sh", "poc.txt", "exploit.txt",
     "poc.http", "exploit.http", "request.http",
+    "template.yaml", "template.yml", "nuclei.yaml", "nuclei.yml",
 ]
 
 
@@ -148,11 +185,46 @@ def fetch_github_repo_poc(repo_full_name: str) -> str:
         for filename in _POC_REPO_FILES:
             url = f"https://cdn.jsdelivr.net/gh/{repo_full_name}@{branch}/{filename}"
             try:
-                resp = httpx.get(url, timeout=cfg.request_timeout, follow_redirects=True, proxy=cfg.httpx_proxy)
+                resp = httpx.get(url, timeout=_source_timeout(), follow_redirects=True, proxy=_proxy())
                 if resp.status_code == 200 and len(resp.text) > 50:
                     return resp.text
             except Exception:
                 continue
+        # Repositories in the aggregate index often keep the request under a
+        # nested exploit/ or nuclei/ directory. Use the Git tree API only as a
+        # bounded fallback and fetch text-like files, preserving the original
+        # source content for evidence extraction.
+        try:
+            tree = httpx.get(
+                f"https://api.github.com/repos/{repo_full_name}/git/trees/{branch}",
+                params={"recursive": "1"},
+                headers={"Accept": "application/vnd.github+json"},
+                timeout=_source_timeout(),
+                follow_redirects=True,
+                proxy=_proxy(),
+            )
+            if tree.status_code != 200:
+                continue
+            paths = []
+            for item in (tree.json().get("tree") or []):
+                path = str(item.get("path") or "")
+                if item.get("type") != "blob" or len(path) > 180:
+                    continue
+                lower = path.lower()
+                if lower.endswith((".py", ".rb", ".go", ".js", ".sh", ".http", ".txt", ".md", ".yaml", ".yml")) and any(
+                    token in lower for token in ("poc", "exploit", "exp", "request", "template", "cve")
+                ):
+                    paths.append(path)
+            for path in paths[:12]:
+                url = f"https://cdn.jsdelivr.net/gh/{repo_full_name}@{branch}/{path}"
+                try:
+                    resp = httpx.get(url, timeout=_source_timeout(), follow_redirects=True, proxy=_proxy())
+                    if resp.status_code == 200 and len(resp.text) > 50:
+                        return resp.text
+                except Exception:
+                    continue
+        except Exception:
+            continue
     return ""
 
 
@@ -175,9 +247,9 @@ def search_exploitdb(cve_id: str) -> dict:
                 "X-Requested-With": "XMLHttpRequest",
                 "Accept": "application/json",
             },
-            timeout=cfg.request_timeout,
+            timeout=_source_timeout(),
             follow_redirects=True,
-            proxy=cfg.httpx_proxy,
+            proxy=_proxy(),
         )
         if resp.status_code == 200:
             try:
@@ -203,6 +275,32 @@ def search_exploitdb(cve_id: str) -> dict:
         return {"found": False, "source": "exploit-db", "error": str(e)}
 
 
+def fetch_exploitdb_content(exploit_id: str) -> dict[str, str]:
+    """Fetch Exploit-DB's raw exploit endpoint before HTML extraction.
+
+    The HTML page is frequently blocked or rendered without the code. The raw
+    endpoint contains the curl/Python request construction that the evidence
+    parser can turn into an exact request.
+    """
+    value = str(exploit_id or "").strip()
+    if not value.isdigit():
+        return {"content": "", "error": "invalid exploit id"}
+    url = f"https://www.exploit-db.com/raw/{value}"
+    try:
+        resp = httpx.get(
+            url,
+            headers={"User-Agent": "Mozilla/5.0", "Accept": "text/plain,*/*"},
+            timeout=_source_timeout(),
+            follow_redirects=True,
+            proxy=_proxy(),
+        )
+        if resp.status_code == 200 and resp.text.strip():
+            return {"content": resp.text, "url": url}
+        return {"content": "", "url": url, "error": f"HTTP {resp.status_code}"}
+    except Exception as exc:
+        return {"content": "", "url": url, "error": str(exc)}
+
+
 # ── imfht 漏洞库 ──
 
 _IMFHT_API = "https://cve.imfht.com"
@@ -214,9 +312,9 @@ def search_imfht(cve_id: str) -> dict:
         url = f"{_IMFHT_API}/{cve_id}"
         resp = httpx.get(
             url,
-            timeout=cfg.request_timeout,
+            timeout=_source_timeout(),
             follow_redirects=True,
-            proxy=cfg.httpx_proxy,
+            proxy=_proxy(),
             headers={"User-Agent": "Mozilla/5.0"},
         )
         if resp.status_code == 200:

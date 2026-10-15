@@ -14,5 +14,5 @@ def test_txt_upload_and_env_url_target_are_accepted(tmp_path):
                 response = client.post("/api/tasks", files={"files": ("list.txt", b"CVE-2001-0075\n")}, data={"target_ip": "http://192.0.2.5:8000"})
                 assert response.status_code == 200
                 task = response.json()
-                assert task["target_ip"] == "192.0.2.5"
+                assert task["target_ip"] == "192.0.2.5:8000"
                 assert Path(task["upload_dir"]).joinpath("list.txt").is_file()

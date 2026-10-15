@@ -6,6 +6,12 @@ from cve_hunter.tools import poc_sources
 
 
 class PocSourcesTests(unittest.TestCase):
+    def test_fetch_exploitdb_raw_rejects_invalid_id_without_network(self):
+        with patch.object(poc_sources.httpx, "get") as get:
+            result = poc_sources.fetch_exploitdb_content("not-an-id")
+        self.assertFalse(result["content"])
+        get.assert_not_called()
+
     def test_exploitdb_html_200_is_treated_as_no_match(self):
         class Response:
             status_code = 200

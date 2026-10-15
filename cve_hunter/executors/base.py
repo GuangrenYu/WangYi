@@ -43,19 +43,28 @@ def infer_protocol(
     if any(marker in text for marker in ("ssh", "ftp", "smtp", "ldap", "mqtt", "tcp", "udp", "smb")):
         return PROTOCOL_TCP
 
-    # 即便 AI 把「PHP 缓冲区溢出 / ActiveX / Web 组件」这类判成非 HTTP，只要描述/类型
-    # 里出现明确的 Web 技术关键词，也应按 HTTP 继续走（否则会误报「协议执行器未实现」）。
+    # 即便 AI 把组件/反序列化/库漏洞判成非 HTTP，只要描述里有 Web/HTTP 入口或
+    # 常见 Web 攻击面关键词，就按 HTTP 继续（IPS 验证主路径）。
     web_markers = (
         "php", "activex", "web", "http", "https", "cgi", "asp", "jsp",
         "apache", "iis", "nginx", "tomcat", "servlet", "browser",
         "javascript", "html", "joomla", "wordpress", "drupal",
+        # 组件/反序列化/中间件：对方 YAML 已证明可走 HTTP 打点
+        "jackson", "deserialize", "deserialization", "serialization",
+        "serializ", "gadget", "objectinput", "xstream", "fastjson", "gson",
+        "spring", "struts", "rest", "json", "xml", "api",
+        "weblogic", "websphere", "jboss", "solr", "elasticsearch",
+        "remote code", "remote command", "rce", "ssrf", "xxe",
+        "endpoint", "url", "request", "payload",
     )
     if any(marker in text for marker in web_markers):
         return PROTOCOL_HTTP
 
     if is_http_vuln:
         return PROTOCOL_HTTP
-    return PROTOCOL_UNSUPPORTED
+    # IPS 批测默认放宽：无法明确判为 kernel/tcp/db 时，仍按 HTTP 尝试生成/验证，
+    # 避免「协议未支持」过早归档（对方 nuclei YAML 可命中的案例不应被挡）。
+    return PROTOCOL_HTTP
 
 
 def build_execution_spec(
