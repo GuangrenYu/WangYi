@@ -15,8 +15,12 @@ EMPTY_CVE_VALUES = {"", "-", "--", "---", "N/A", "NA", "NONE", "NULL", "无", "�
 def classify_ips_matches(matches: list[dict[str, Any]] | None, current_cve: str) -> dict[str, Any]:
     """按防火墙日志 CVE 字段把 IPS 命中归因为当前 CVE 或通用命中。
 
-    只有日志 CVE 字段明确包含 ``current_cve`` 时，才算当前 CVE 命中。
-    CVE 字段为空、---、缺失或指向其他 CVE 时，都归入 generic_matches。
+    成功口径（多设备 OR）：**任一**设备（H3C / 迪普等）的日志 CVE 字段明确
+    包含 ``current_cve`` 即 ``ips_matched=True``。一台通用命中、另一台精确命中
+    时，精确命中优先，不能因某一台未命中/仅通用而判失败。两台设备的告警都保留
+    在 ``all_matches`` 里。
+
+    CVE 字段为空、---、缺失或只指向其他 CVE 时，归入 generic_matches。
     """
     current = current_cve.strip().upper()
     all_matches: list[dict[str, Any]] = []
@@ -24,24 +28,35 @@ def classify_ips_matches(matches: list[dict[str, Any]] | None, current_cve: str)
     generic_matches: list[dict[str, Any]] = []
     other_cve_matches: list[dict[str, Any]] = []
     missing_cve_matches: list[dict[str, Any]] = []
+    sources_current: set[str] = set()
+    sources_generic: set[str] = set()
+    sources_all: set[str] = set()
 
     for match in matches or []:
         annotated = _annotate_match(match, current)
         all_matches.append(annotated)
+        source = _match_source(annotated)
+        if source:
+            sources_all.add(source)
 
         parsed_cves = set(annotated.get("_parsed_cves", []))
         if current and current in parsed_cves:
             annotated["_ips_match_type"] = "current_cve"
             cve_matches.append(annotated)
+            if source:
+                sources_current.add(source)
         else:
             annotated["_ips_match_type"] = "generic"
             generic_matches.append(annotated)
+            if source:
+                sources_generic.add(source)
             if parsed_cves:
                 other_cve_matches.append(annotated)
             else:
                 missing_cve_matches.append(annotated)
 
     return {
+        # OR across devices: one exact CVE hit is enough.
         "ips_matched": len(cve_matches) > 0,
         "generic_ips_matched": len(generic_matches) > 0,
         "all_matches": all_matches,
@@ -54,6 +69,11 @@ def classify_ips_matches(matches: list[dict[str, Any]] | None, current_cve: str)
         "generic_match_count": len(generic_matches),
         "other_cve_match_count": len(other_cve_matches),
         "missing_cve_match_count": len(missing_cve_matches),
+        "sources": sorted(sources_all),
+        "cve_match_sources": sorted(sources_current),
+        "generic_match_sources": sorted(sources_generic),
+        "hit_h3c": "h3c" in sources_current,
+        "hit_dptech": "dptech" in sources_current,
     }
 
 
@@ -75,7 +95,21 @@ def summarize_ips_classification(classification: dict[str, Any]) -> dict[str, in
         "generic_match_count": int(classification.get("generic_match_count") or 0),
         "other_cve_match_count": int(classification.get("other_cve_match_count") or 0),
         "missing_cve_match_count": int(classification.get("missing_cve_match_count") or 0),
+        "hit_h3c": bool(classification.get("hit_h3c")),
+        "hit_dptech": bool(classification.get("hit_dptech")),
+        "cve_match_sources": list(classification.get("cve_match_sources") or []),
+        "generic_match_sources": list(classification.get("generic_match_sources") or []),
+        "sources": list(classification.get("sources") or []),
     }
+
+
+def _match_source(match: dict[str, Any]) -> str:
+    raw = str(match.get("source") or match.get("hostname") or "").strip().lower()
+    if "h3c" in raw:
+        return "h3c"
+    if "dptech" in raw or "dp" == raw or raw.startswith("dp"):
+        return "dptech"
+    return raw
 
 
 def _annotate_match(match: dict[str, Any], current_cve: str) -> dict[str, Any]:
@@ -96,11 +130,12 @@ def _cve_field_values(match: dict[str, Any]) -> list[Any]:
     if not isinstance(fields, dict):
         fields = match.get("Fields")
     if isinstance(fields, dict):
-        for key in ("CVE", "cve", "Cve"):
+        for key in ("CVE", "cve", "Cve", "cve_list", "CVE_LIST"):
             if key in fields:
                 values.append(fields.get(key))
 
-    for key in ("CVE", "cve", "Cve"):
+    # 日志服务顶层 cve_list（|CVE-a|CVE-b|）与 CVE 字段都要读，不能只认 fields.CVE。
+    for key in ("CVE", "cve", "Cve", "cve_list", "CVE_LIST"):
         if key in match:
             values.append(match.get(key))
 

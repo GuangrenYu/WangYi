@@ -8,6 +8,15 @@ from cve_hunter.tools import local_kb
 
 
 class LocalKbTests(unittest.TestCase):
+    def test_ordered_request_steps_require_explicit_document_evidence(self):
+        requests = [
+            "GET /login HTTP/1.1\nHost: {{TARGET_HOST}}\n\n",
+            "GET /admin HTTP/1.1\nHost: {{TARGET_HOST}}\n\n",
+        ]
+        self.assertEqual(local_kb._ordered_request_steps("two unrelated examples", requests), [])
+        steps = local_kb._ordered_request_steps("Step 1 login, then Step 2", requests)
+        self.assertEqual([item["step_index"] for item in steps], [1, 2])
+
     def test_poc0911_fallback_is_reference_only_and_ignores_old_results(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -29,6 +38,24 @@ class LocalKbTests(unittest.TestCase):
                 custom.parent.mkdir(parents=True)
                 custom.write_text("```http\nGET /trusted HTTP/1.1\nHost: target\n\n```", encoding="utf-8")
                 self.assertEqual(local_kb.search_local_kb("CVE-2024-23334")["source"], "local_kb_custom")
+
+    def test_poc0911_collects_request_variants_without_importing_status(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            directory = root / "poc0911" / "CVE-2024-23334"
+            directory.mkdir(parents=True)
+            (directory / "poc.http").write_text("GET /first HTTP/1.1\nHost: target\n\n", encoding="utf-8")
+            (directory / "result.json").write_text(
+                '{"status":"SUCCESS","poc_candidates":[{"raw_http":"GET /second%00 HTTP/1.1\\nHost: target\\n\\n"}]}',
+                encoding="utf-8",
+            )
+            with (patch.object(local_kb, "_kb_base", return_value=root),
+                  patch.object(local_kb, "_search_pcap_kb", return_value={}),
+                  patch.object(local_kb, "_search_vulhub_readme", return_value={})):
+                result = local_kb.search_local_kb("CVE-2024-23334")
+            self.assertEqual(len(result["raw_http_list"]), 2)
+            self.assertIn("/second%00", result["raw_http_list"][1])
+            self.assertNotIn("status", result)
 
     def test_prioritizes_cve_specific_repos_over_generic_collections(self):
         repos = [

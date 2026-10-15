@@ -49,6 +49,8 @@ class Config:
     llm_api_key: str = field(default_factory=lambda: os.getenv("LLM_API_KEY", ""))
     llm_base_url: str = field(default_factory=lambda: os.getenv("LLM_BASE_URL", "https://api.deepseek.com"))
     llm_model: str = field(default_factory=lambda: os.getenv("LLM_MODEL", "deepseek-chat"))
+    llm_max_calls_per_cve: int = field(default_factory=lambda: _int_env("LLM_MAX_CALLS_PER_CVE", 12))
+    llm_timeout: int = field(default_factory=lambda: _int_env("LLM_TIMEOUT", 60))
     agent_llm_enabled: bool = field(
         default_factory=lambda: os.getenv("AGENT_LLM_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}
     )
@@ -57,6 +59,9 @@ class Config:
     nvd_api_key: str = field(default_factory=lambda: os.getenv("NVD_API_KEY", ""))
 
     tavily_api_key: str = field(default_factory=lambda: os.getenv("TAVILY_API_KEY", ""))
+    brave_search_api_key: str = field(default_factory=lambda: os.getenv("BRAVE_SEARCH_API_KEY", ""))
+    searxng_url: str = field(default_factory=lambda: os.getenv("SEARXNG_URL", ""))
+    search_paid_fallback: bool = field(default_factory=lambda: _bool_env("SEARCH_PAID_FALLBACK", True))
 
     # http2pcap 外部服务地址（可选，不配置则使用内置 scapy 抓包）
     http2pcap_url: str = field(default_factory=lambda: os.getenv("HTTP2PCAP_URL", ""))
@@ -88,8 +93,27 @@ class Config:
     # 请求超时(秒)
     request_timeout: int = field(default_factory=lambda: int(os.getenv("REQUEST_TIMEOUT", "30")))
 
-    # 目标 IP（用于 nuclei PoC 验证）
+    # Web 工作台调度与状态传输参数。事件和快照默认采用有界/合并策略，
+    # 避免大批量任务把浏览器、磁盘和 Web 线程拖入全量刷新。
+    web_event_buffer_size: int = field(
+        default_factory=lambda: _int_env("WEB_EVENT_BUFFER_SIZE", 4096)
+    )
+    web_task_save_interval: float = field(
+        default_factory=lambda: max(0.1, float(os.getenv("WEB_TASK_SAVE_INTERVAL", "1.5")))
+    )
+    web_max_active_cves: int = field(
+        default_factory=lambda: _int_env("WEB_MAX_ACTIVE_CVES", 16)
+    )
+    web_source_timeout: int = field(
+        default_factory=lambda: max(3, _int_env("WEB_SOURCE_TIMEOUT", 12))
+    )
+    reference_crawl_budget: int = field(
+        default_factory=lambda: min(30, max(0, _int_env("REFERENCE_CRAWL_BUDGET", 20)))
+    )
+
+    # 目标 IP（用于 PoC 验证）；端口可单独由 TARGET_PORT 指定。
     target_ip: str = field(default_factory=lambda: os.getenv("TARGET_IP", "127.0.0.1"))
+    target_port: int = field(default_factory=lambda: _int_env("TARGET_PORT", 0))
 
     # 自动攻击环境搭建（默认关闭，避免批量任务意外拉镜像/启动容器）
     auto_env_enabled: bool = field(

@@ -38,31 +38,45 @@ def send_poc_and_capture(
 ) -> dict:
     """发送 PoC 并抓包。
 
-    优先使用 http2pcap 服务；服务不可达/异常时回退内置 raw socket（本地靶场）。
+    统一走旧版 raw ``/api/http2pcap``：若只有 nuclei YAML，先就地转成 Raw HTTP。
+    服务不可达/异常时回退内置 raw socket（本地靶场）。
     """
-    if cfg.http2pcap_url:
-        if nuclei_yaml:
-            result = _send_via_http2pcap_nuclei(nuclei_yaml, target_url, cve_id)
-            # nuclei 依赖服务侧执行；不可达时无法可靠回退 nuclei 语义
-            if result.get("success") or not _looks_like_http2pcap_unreachable(result):
-                return result
-            if raw_http:
-                fallback = _send_builtin(raw_http, target_url, cve_id)
-                fallback["http2pcap_fallback"] = True
-                fallback["http2pcap_error"] = result.get("error", "")
-                return fallback
-            result.setdefault("error_type", "http2pcap_unreachable")
-            return result
+    # Keep trailing blank lines on raw HTTP; only trim for emptiness checks.
+    raw_http = str(raw_http or "")
+    nuclei_yaml = str(nuclei_yaml or "").strip()
+    converted_from_yaml = False
+    if nuclei_yaml and not raw_http.strip():
+        from cve_hunter.poc_parser import nuclei_yaml_to_raw_http
 
+        raw_http = nuclei_yaml_to_raw_http(nuclei_yaml)
+        converted_from_yaml = bool(raw_http.strip())
+        if not raw_http.strip():
+            return {
+                "success": False,
+                "error": "无法从 nuclei YAML 提取可发包的 Raw HTTP",
+                "error_type": "invalid_request",
+            }
+
+    if not raw_http.strip():
+        return {"success": False, "error": "缺少 raw_http 或可转换的 nuclei_yaml"}
+
+    if cfg.http2pcap_url:
         result = _send_via_http2pcap(raw_http, cve_id)
+        if converted_from_yaml:
+            result["yaml_to_raw"] = True
         if result.get("success") or not _looks_like_http2pcap_unreachable(result):
             return result
         # 服务挂掉时不要把整个 HTTP 批测打成「发包服务失败」
         fallback = _send_builtin(raw_http, target_url, cve_id)
         fallback["http2pcap_fallback"] = True
         fallback["http2pcap_error"] = result.get("error", "")
+        if converted_from_yaml:
+            fallback["yaml_to_raw"] = True
         return fallback
-    return _send_builtin(raw_http, target_url, cve_id)
+    result = _send_builtin(raw_http, target_url, cve_id)
+    if converted_from_yaml:
+        result["yaml_to_raw"] = True
+    return result
 
 
 def _looks_like_http2pcap_unreachable(result: dict) -> bool:
@@ -182,72 +196,133 @@ def _post_http2pcap(path: str, *, json: dict, timeout: int) -> dict:
 
 
 def _log_received_epoch(log: dict) -> float:
-    """取采集端的入库时间。
+    """取采集端入库时间。
 
-    华三设备的 ``timestamp`` 是 UTC（比本地早 8 小时，实测同一条告警
-    ``timestamp=04:39:04`` 而 ``received_at=12:39:05``），判时序只能用 received_at。
-    解析不出来时返回 inf，宁可多算一条也不漏。
+    华三设备的 ``timestamp`` 是 UTC（比本地早约 8 小时），判时序只能用
+    ``received_at``。解析失败时返回 +inf，宁可多算一条也不漏。
     """
     stamp = str(log.get("received_at") or "").strip()
     try:
         return time.mktime(time.strptime(stamp, "%Y-%m-%d %H:%M:%S"))
-    except (ValueError, TypeError):
+    except (ValueError, TypeError, OverflowError, OSError):
         return float("inf")
 
 
+def _ips_logs_base_url() -> str:
+    """从 IPS_API_URL 推出日志服务根地址（/api/logs 与 /api/cve-match 同主机）。"""
+    raw = str(getattr(cfg, "ips_api_url", "") or "").strip()
+    if not raw:
+        # 与 http2pcap 同机的默认监控口，避免配置缺失时完全不复查。
+        http2pcap = str(getattr(cfg, "http2pcap_url", "") or "").strip()
+        if http2pcap:
+            parsed = urlparse(http2pcap)
+            if parsed.scheme and parsed.netloc:
+                host = parsed.hostname or ""
+                return f"{parsed.scheme}://{host}:3013"
+        return ""
+    parsed = urlparse(raw)
+    if not parsed.scheme or not parsed.netloc:
+        return ""
+    return f"{parsed.scheme}://{parsed.netloc}"
+
+
 def refetch_ips_cve_matches(cve_id: str, since_epoch: float) -> list[dict]:
-    """延迟后多次二次查询 IPS 日志，补回 check_ips 因时序漏掉的 CVE 精确命中。
+    """延迟后多次查询 IPS 日志，补回 check_ips 因时序漏掉的精确 CVE 命中。
 
-    http2pcap 的 check_ips 发完包后立即查 IPS，部分精确签名（如迪普的
-    Joomla 文件上传）会晚几秒才落库，导致只拿到通用/误报命中。
-    这里在累计 3/6/10 秒后各查一次，命中即返回，扩大时序窗口。
+    环境有 H3C + 迪普两台设备。http2pcap 的 ``check_ips`` 发完包后立即查询，
+    常先返回某一台的通用特征，而另一台的当前 CVE 精确签名晚 1~数秒才落库。
+    成功口径是「任一设备日志 CVE 字段命中当前 CVE」，因此这里按时间窗拉取
+    **两台设备的全部告警**，再筛出点名当前 CVE 的记录，合并进判定。
 
-    两个和接口行为绑定的细节：
-    - 日志接口只认 ``start_time``/``end_time``。写成 ``startTime``/``endTime``
-      会被忽略，服务端退回全天窗口（实测返回 7554 条整天日志、且默认只给
-      page_size=100 条），既漏又串。
-    - 即便窗口正确，也按 ``received_at`` 再做一次客户端过滤，防止旧告警被算成本次命中。
+    接口细节：
+    - 只认 ``start_time``/``end_time``（驼峰写法会被忽略并退回全天窗口）。
+    - ``page_size`` 默认 100，窗口内告警可能更多，显式用 ``IPS_LOG_PAGE_SIZE``。
+    - 客户端再用 ``received_at >= since_epoch - 10`` 过滤，避免串到旧告警。
     """
-    target = cve_id.upper()
-    parsed = urlparse(cfg.ips_api_url)
-    base = f"{parsed.scheme}://{parsed.netloc}"
-    floor = since_epoch - 10
+    target = str(cve_id or "").strip().upper()
+    if not target:
+        return []
+    base = _ips_logs_base_url()
+    if not base:
+        return []
+
+    floor = float(since_epoch) - 10.0
     start = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(floor))
+    # 累计约 3/6/10 秒，覆盖迪普精确签名晚落库的常见延迟。
     for delay in (3.0, 3.0, 4.0):
         time.sleep(delay)
-        end = time.strftime("%Y-%m-%d %H:%M:%S")
+        end = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(time.time()))
+        matches: list[dict] = []
         try:
-            resp = httpx.get(
-                f"{base}/api/logs",
-                params={
-                    "start_time": start,
-                    "end_time": end,
-                    "page": 1,
-                    "page_size": IPS_LOG_PAGE_SIZE,
-                },
-                timeout=15,
-                trust_env=False,
-            )
-            if resp.status_code != 200:
-                continue
-            logs = resp.json().get("data", [])
+            for page in range(1, 6):
+                resp = httpx.get(
+                    f"{base.rstrip('/')}/api/logs",
+                    params={
+                        "start_time": start,
+                        "end_time": end,
+                        "page": page,
+                        "page_size": IPS_LOG_PAGE_SIZE,
+                    },
+                    timeout=15,
+                    trust_env=False,
+                )
+                if resp.status_code != 200:
+                    break
+                try:
+                    payload = resp.json()
+                except Exception:
+                    break
+                logs = payload.get("data") if isinstance(payload, dict) else None
+                if not isinstance(logs, list):
+                    break
+                for log in logs:
+                    if not isinstance(log, dict):
+                        continue
+                    if _log_received_epoch(log) < floor:
+                        continue
+                    fields = log.get("fields") if isinstance(log.get("fields"), dict) else {}
+                    blob = " ".join(
+                        [
+                            str(log.get("cve_list") or ""),
+                            str(fields.get("CVE") or ""),
+                            str(log.get("attack_name") or ""),
+                        ]
+                    ).upper()
+                    if target in blob:
+                        matches.append(log)
+                if len(logs) < IPS_LOG_PAGE_SIZE:
+                    break
         except Exception:
             continue
-        matches = []
-        for log in logs:
-            if not isinstance(log, dict):
-                continue
-            if _log_received_epoch(log) < floor:
-                continue
-            fields = log.get("fields") or {}
-            cve_list = str(log.get("cve_list") or "")
-            fields_cve = str(fields.get("CVE") or "") if isinstance(fields, dict) else ""
-            attack = str(log.get("attack_name") or "")
-            if target in (cve_list + fields_cve + attack).upper():
-                matches.append(log)
         if matches:
             return matches
     return []
+
+
+def merge_ips_matches(*groups: list | None) -> list[dict]:
+    """合并多路 IPS 命中（http2pcap 即时结果 + 日志复查），按 id 去重并保留两台设备。"""
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for group in groups:
+        for match in group or []:
+            if not isinstance(match, dict):
+                continue
+            key = str(match.get("id") or "")
+            if not key:
+                # 无 id 时用 source+timestamp+attack 近似去重
+                key = "|".join(
+                    [
+                        str(match.get("source") or match.get("hostname") or ""),
+                        str(match.get("timestamp") or match.get("received_at") or ""),
+                        str(match.get("attack_id") or match.get("attack_name") or ""),
+                        str(match.get("cve_list") or ""),
+                    ]
+                )
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(match)
+    return merged
 
 
 def _send_builtin(raw_http: str, target_url: str = "", cve_id: str = "") -> dict:

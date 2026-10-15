@@ -17,7 +17,7 @@ def execute(connection, cancelled, cve: str, options: dict) -> None:
         signal.signal(signal.SIGTERM, lambda *_: (_ for _ in ()).throw(RunCancelled()))
 
     def progress(event):
-        if cancelled.is_set():
+        if cancelled.is_set() and event.get("event") != "llm_usage":
             raise RunCancelled()
         connection.send({"event": "progress", "data": event})
 

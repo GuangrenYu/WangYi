@@ -4,6 +4,8 @@ Agent 职责速览：
 - EnvironmentAgent：仅 local-container 模式使用。负责 vulhub/compose 发现与可选
   启动；正常 HTTP 路径由 graph 直接跳过本 agent，改用 TARGET_IP 默认目标。
   不再调用 LLM（环境决策由确定性规则完成）。
+- ReferenceAgent：负责 NVD References 抓取、相关来源追踪、证据结构化与缓存。
+  不调用 LLM、不生成 PoC、不做 trigger/审查。
 - TriggerAgent：用确定性规则抽象 trigger_logic / attack_objective /
   validation_hint。为节省 token，不再调用 LLM；大段 References 只喂给
   poc_from_refs 一次。
@@ -185,6 +187,117 @@ def run_environment_agent(state: CVEState) -> dict[str, Any]:
     }
 
 
+def run_reference_agent(state: CVEState, *, max_urls: int | None = None) -> dict[str, Any]:
+    """Fetch references and enrich evidence within the configured discovery budget.
+
+    Does not call the LLM and does not generate PoCs.
+    """
+    from cve_hunter.tools.ref_cache import (
+        load_reference_cache,
+        merge_reference_contents,
+        save_reference_cache,
+    )
+    from cve_hunter.tools.web_extract import (
+        MIN_REFERENCE_CONTENT_LEN,
+        _content_usable,
+    )
+    from cve_hunter.tools.reference_crawl import enrich_references
+    from cve_hunter.tools.reference_evidence import has_http_evidence, link_score, structure_reference
+    from cve_hunter.tools.reference_utils import normalize_reference_urls
+
+    urls = normalize_reference_urls(state.nvd_references or [])
+    urls.sort(key=lambda url: -link_score(url, cve_id=state.cve_id))
+    if max_urls is not None:
+        urls = urls[: max(0, int(max_urls))]
+    if not urls and not state.cve_id:
+        return {
+            "reference_contents": [],
+            "errors": [],
+            "trace": {
+                "agent": "ReferenceAgent",
+                "action": "fetch_reference_contents",
+                "status": "skipped",
+                "summary": "无 NVD References 可抓取",
+                "data": {"url_count": 0, "cached_hits": 0, "fetched": 0},
+            },
+        }
+
+    cached = load_reference_cache(state.cve_id)
+    cached_by_url = {
+        str(item.get("url") or "").strip(): item
+        for item in cached
+        if str(item.get("url") or "").strip()
+        and (_content_usable(str(item.get("content") or "")) or has_http_evidence(item))
+    }
+    missing = [url for url in urls if url not in cached_by_url]
+    fetched: list[dict[str, Any]] = []
+    errors: list[str] = []
+    sources: dict[str, int] = {}
+
+    # Root reads formerly ran outside the follow-up budget and could retry the
+    # same URL twice. The isolated reader now owns all network access.
+
+    contents: list[dict[str, Any]] = []
+    if not urls:
+        contents = [structure_reference(item, state.cve_id) for item in cached]
+    for url in urls:
+        item = cached_by_url.get(url)
+        if item:
+            contents.append(structure_reference(item, state.cve_id))
+            continue
+
+    enrichment = enrich_references(
+        state.cve_id, contents, cached,
+        allow_network=not state.local_only or state.allow_reference_links,
+        reference_urls=urls,
+    )
+    contents = enrichment["pages"]
+    visited = set(enrichment.get("attempted_urls") or [])
+    visited.update(str(page.get(key) or "") for page in contents
+                   for key in ("url", "resolved_url"))
+    pending = [url for url in missing if url not in visited]
+    fetched = [page for page in contents if page.get("url") in missing]
+    for page in fetched:
+        source = str(page.get("source") or "unknown")
+        sources[source] = sources.get(source, 0) + 1
+    errors.extend(enrichment["errors"])
+    merged = merge_reference_contents(cached, contents)
+    cache_path = save_reference_cache(state.cve_id, merged) if merged else None
+    return {
+        "reference_contents": contents,
+        "errors": errors,
+        "trace": {
+            "agent": "ReferenceAgent",
+            "action": "fetch_reference_contents",
+            "status": "completed" if contents else "empty",
+            "summary": (
+                f"参考正文 {len(contents)}/{len(urls)} "
+                f"(缓存命中 {len(urls) - len(missing)}，新抓取 {len(fetched)})"
+            ),
+            "data": {
+                "url_count": len(urls),
+                "cached_hits": len(urls) - len(missing),
+                "fetched": len(fetched),
+                "error_count": len(errors),
+                "sources": sources,
+                "cache_path": str(cache_path or ""),
+                "allow_reference_links": bool(state.allow_reference_links),
+                "min_content_len": MIN_REFERENCE_CONTENT_LEN,
+                "followup_pages": sum(page.get("source") == "reference_followup" for page in contents),
+                "crawl_elapsed_sec": enrichment["elapsed_sec"],
+                "crawl_budget_sec": enrichment["budget_sec"],
+                "crawl_timed_out": enrichment["timed_out"],
+                "crawl_scheduled": enrichment["scheduled"],
+                "unresolved_reference_urls": pending,
+                "attempted_reference_urls": sorted(visited.intersection(missing)),
+                "reference_check_complete": not pending,
+                "discovery": enrichment.get("discovery", {}),
+                "evidence_code_blocks": sum(len(page.get("poc_evidence", {}).get("code_blocks", [])) for page in contents),
+            },
+        },
+    }
+
+
 def run_trigger_agent(state: CVEState) -> dict[str, Any]:
     """Extract a coarse trigger model with deterministic rules only.
 
@@ -253,6 +366,10 @@ def run_critic_agent(state: CVEState, candidate: dict[str, Any]) -> dict[str, An
             flags.append("raw_http_request_line_unusual")
             score_delta -= 0.15
     elif nuclei_yaml:
+        lowered = str(nuclei_yaml).lower()
+        if "http:" not in lowered and "requests:" not in lowered:
+            flags.append("nuclei_yaml_missing_http_section")
+            score_delta -= 0.25
         enriched.setdefault("validation_hint", {"type": "nuclei_match"})
     elif execution_spec.get("protocol") == "database" and (
         execution_spec.get("trigger_sql") or execution_spec.get("schema_sql") or execution_spec.get("setup_sql")
@@ -2194,7 +2311,7 @@ def default_attack_environment(*, setup_mode: str = "disabled") -> dict[str, Any
 
 
 # AI 生成或低置信候选才值得花 Critic LLM；高置信本地 KB 只走规则。
-_AI_POC_SOURCES = frozenset({"reference", "search", "local_llm"})
+_AI_POC_SOURCES = frozenset({"reference", "search", "local_llm", "ai_nuclei"})
 _CRITIC_LLM_CONFIDENCE_THRESHOLD = 0.7
 
 
@@ -2346,6 +2463,7 @@ def _invoke_agent_llm(prompt: str) -> str:
         model=_agent_llm_model(),
         temperature=0.1,
         max_tokens=2048,
+        purpose="critic_agent" if "CriticAgent" in prompt else "agent_analysis",
     )
 
 

@@ -42,6 +42,26 @@ class LocalContainerModeTests(unittest.TestCase):
         self.assertEqual(update["milestones"]["environment_planned"]["status"], "skipped")
         self.assertEqual(update["agent_trace"][-1]["action"], "skip_for_http_path")
 
+    def test_poc0911_is_generation_context_not_direct_request(self):
+        state = CVEState(cve_id="CVE-2024-23334", is_http_vuln=True)
+        result = {
+            "found": True,
+            "source": "local_kb_poc0911",
+            "reference_only": True,
+            "raw_http": "GET /generic HTTP/1.1\nHost: {{TARGET_HOST}}\n\n",
+            "raw_http_list": ["GET /generic HTTP/1.1\nHost: {{TARGET_HOST}}\n\n"],
+            "content": "历史请求，仅供生成阶段参考",
+        }
+        with (
+            patch("cve_hunter.graph.search_local_kb", return_value=result),
+            patch("cve_hunter.graph.console.print"),
+        ):
+            update = node_local_kb_search(state)
+
+        self.assertEqual(update["current_phase"], "reference_analysis")
+        self.assertNotIn("poc_candidates", update)
+        self.assertIn("历史请求", update["local_knowledge_context"])
+
     def test_environment_route_stops_after_local_match_failure(self):
         state = CVEState(current_phase="generate_report", local_container_mode=True)
         self.assertEqual(route_after_environment(state), "generate_report")
