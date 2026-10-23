@@ -7,24 +7,32 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from cve_hunter.graph import (
+    _annotate_dispatch_priority,
     _append_attempt_history,
     _candidate_update,
-    _llm_poc_candidates,
+    _deferred_fallback_update,
     _next_attempt_or_phase_update,
     _raw_http_candidates,
+    _reference_http_evidence_candidates,
     node_generate_report,
-    node_poc_from_refs,
+    node_poc_from_refs_yaml,
     node_verify_poc,
     node_poc_from_nvd,
     route_after_phase,
     _next_phase_after_verify,
 )
 from cve_hunter.state import CVEState
+from cve_hunter.poc_parser import parse_poc_candidates_json
 from cve_hunter.status_codes import EXECUTION_POLICY_BLOCKED, POC_SOURCE_ACCESS_FAILED
 
 
 def _raw(path: str) -> str:
     return f"GET {path} HTTP/1.1\nHost: {{{{TARGET_HOST}}}}\n\n"
+
+
+def _yaml_response(path):
+    template = f"id: fixture\ninfo:\n  name: fixture\n  author: test\n  severity: info\nhttp:\n  - method: GET\n    path:\n      - '{{{{BaseURL}}}}{path}'\n"
+    return json.dumps({"candidates": [{"nuclei_yaml": template}]})
 
 
 class GraphCandidateTests(unittest.TestCase):
@@ -50,10 +58,11 @@ class GraphCandidateTests(unittest.TestCase):
                     self.assertEqual(update["attempt_history"][0]["ips_matched"], matched)
                     if local_only:
                         state = replace(state, **update)
-                        with patch("cve_hunter.graph.invoke_llm", return_value='```http\n' + _raw("/new") + '```'):
+                        state.nvd_description = 'requests.get("http://example.test/new")'
+                        with patch("cve_hunter.graph.invoke_llm", return_value=_yaml_response("/new")):
                             generated = node_poc_from_nvd(state)
                         self.assertEqual(generated["current_phase"], "verify_poc")
-                        self.assertIn("/new", generated["poc_raw_http"])
+                        self.assertIn("/new", generated["poc_nuclei_yaml"])
                         state = replace(state, **generated)
                         self.assertEqual(_next_phase_after_verify(state), "generate_report")
 
@@ -61,7 +70,7 @@ class GraphCandidateTests(unittest.TestCase):
         state = CVEState(local_only=True, allow_reference_links=True,
                          phases_tried=["poc_from_nvd", "reference_analysis"],
                          nvd_references=["https://example.test/advisory"])
-        update = node_poc_from_refs(state)
+        update = node_poc_from_refs_yaml(state)
         state = replace(state, **update)
         self.assertEqual(route_after_phase(state), "generate_report")
         self.assertEqual(_next_phase_after_verify(state), "generate_report")
@@ -75,9 +84,10 @@ class GraphCandidateTests(unittest.TestCase):
         state.phases_tried.append("reference_analysis")
         self.assertEqual(_next_phase_after_verify(state), "generate_report")
 
-    @patch("cve_hunter.graph.invoke_llm", return_value='```http\nGET /from-local HTTP/1.1\nHost: {{TARGET_HOST}}\n\n```')
+    @patch("cve_hunter.graph.invoke_llm", return_value=_yaml_response("/from-local"))
     def test_local_context_generation_creates_candidate(self, invoke):
-        state = CVEState(cve_id="CVE-2001-0075", local_only=True, nvd_description="local reproduction path /from-local")
+        state = CVEState(cve_id="CVE-2001-0075", local_only=True,
+                         nvd_description='requests.get("http://example.test/from-local")')
         result = node_poc_from_nvd(state)
         self.assertEqual(result["poc_candidates"][0]["source"], "local_nvd")
         invoke.assert_called_once()
@@ -95,6 +105,23 @@ class GraphCandidateTests(unittest.TestCase):
         self.assertEqual(update["milestones"]["candidate_collected"]["status"], "passed")
         self.assertEqual(update["milestones"]["candidate_collected"]["data"]["added_count"], 2)
 
+    def test_multistep_candidate_is_not_deduped_with_first_step(self):
+        first = _raw("/login")
+        state = CVEState()
+        candidates = _raw_http_candidates([first], source="local_kb_custom")
+        candidates.append({
+            "kind": "raw_http",
+            "source": "local_kb_custom",
+            "raw_http": first,
+            "request_steps": [
+                {"raw_http": first, "step_index": 1},
+                {"raw_http": _raw("/admin"), "step_index": 2},
+            ],
+        })
+        update = _candidate_update(state, candidates)
+        self.assertEqual(len(update["poc_candidates"]), 2)
+        self.assertEqual(len(update["poc_candidates"][1]["request_steps"]), 2)
+
     def test_duplicate_candidate_uses_fallback_phase(self):
         candidates = _raw_http_candidates([_raw("/first")], source="reference")
         state = CVEState(poc_candidates=candidates)
@@ -104,7 +131,7 @@ class GraphCandidateTests(unittest.TestCase):
         self.assertEqual(update["current_phase"], "nuclei_search")
         self.assertNotIn("poc_raw_http", update)
 
-    def test_llm_json_candidates_are_rendered(self):
+    def test_imported_json_requests_are_rendered(self):
         output = """{
           "candidates": [
             {
@@ -118,7 +145,7 @@ class GraphCandidateTests(unittest.TestCase):
           ]
         }"""
 
-        candidates = _llm_poc_candidates(output, source="reference", confidence=0.3, reason="fallback")
+        candidates = parse_poc_candidates_json(output)
 
         self.assertEqual(len(candidates), 1)
         self.assertIn("GET /json-poc HTTP/1.1", candidates[0]["raw_http"])
@@ -126,16 +153,179 @@ class GraphCandidateTests(unittest.TestCase):
         self.assertEqual(candidates[0]["confidence"], 0.8)
         self.assertEqual(candidates[0]["reason"], "json path")
 
+    def test_reference_evidence_candidates_extracted_when_llm_empty(self):
+        page = {
+            "url": "https://raw.githubusercontent.com/example/CVE-2019-3394/README.md",
+            "content": "CVE-2019-3394 demo\n\n```\nPUT /rest/api/content/1?status=draft HTTP/1.1\nHost: t\n\n{}\n```\n",
+            "poc_evidence": {
+                "code_blocks": [{
+                    "text": "PUT /rest/api/content/1?status=draft HTTP/1.1\nHost: t\n\n{}",
+                }],
+            },
+        }
+        state = CVEState(cve_id="CVE-2019-3394", reference_contents=[page], nvd_description="x")
+        extracted = _reference_http_evidence_candidates(state)
+        self.assertGreaterEqual(len(extracted), 1)
+        self.assertIn("/rest/api/content/1", extracted[0]["raw_http"])
+        with (
+            patch("cve_hunter.graph.invoke_llm", return_value='{"candidates":[]}'),
+            patch("cve_hunter.graph.console.quiet", True),
+        ):
+            update = node_poc_from_refs_yaml(state)
+        self.assertEqual(update["current_phase"], "verify_poc")
+        self.assertEqual(update["poc_candidates"][0]["source"], "reference_evidence")
+        self.assertIn("/rest/api/content/1", update["poc_raw_http"])
+
     def test_next_attempt_prefers_untried_candidate(self):
         candidates = _raw_http_candidates([_raw("/first"), _raw("/second")], source="reference")
         state = CVEState(
             poc_candidates=candidates,
             current_candidate_index=0,
-            phases_tried=["poc_from_refs"],
+            phases_tried=["poc_from_refs_yaml"],
         )
 
         with patch("cve_hunter.graph.console.quiet", True):
             update = _next_attempt_or_phase_update(state)
+
+        self.assertEqual(update["current_phase"], "verify_poc")
+        self.assertEqual(update["current_candidate_index"], 1)
+        self.assertIn("/second", update["poc_raw_http"])
+
+    def test_primary_evidence_before_weak_undeployment(self):
+        strong = _raw_http_candidates(
+            ["GET /axis/services/AdminService?method=deployment HTTP/1.1\nHost: t\n\n"],
+            source="reference_evidence",
+            confidence=0.86,
+        )[0]
+        strong["request_steps"] = [
+            {"raw_http": strong["raw_http"]},
+            {"raw_http": "POST /axis/services/exploitservice HTTP/1.1\nHost: t\n\n<body/>"},
+        ]
+        weak = _raw_http_candidates(
+            ["GET /axis/services/AdminService?method=undeployment HTTP/1.1\nHost: t\n\n"],
+            source="reference_evidence",
+            confidence=0.72,
+        )[0]
+        ordered = _annotate_dispatch_priority([weak, strong])
+        self.assertEqual(ordered[0].get("dispatch_priority"), "primary")
+        self.assertIn("deployment", ordered[0]["raw_http"])
+        self.assertNotIn("undeployment", ordered[0]["raw_http"].split("deployment")[0] + "x")
+
+        state = CVEState(
+            poc_candidates=ordered,
+            current_candidate_index=0,
+            attempt_history=[{"candidate_index": 0}],
+            phases_tried=["poc_from_refs_yaml"],
+        )
+        with patch("cve_hunter.graph.console.quiet", True):
+            update = _next_attempt_or_phase_update(state)
+        # After primary is done, secondary undeployment may run.
+        self.assertEqual(update["current_phase"], "verify_poc")
+        self.assertIn("undeployment", update["poc_raw_http"])
+
+    def test_http_evidence_skips_poc0911_deferred_fallback(self):
+        deferred = _raw_http_candidates([_raw("/old")], source="local_kb_poc0911")[0]
+        deferred["reference_only"] = True
+        evidence_page = {
+            "url": "https://example.test/CVE-2018-15711",
+            "title": "CVE-2018-15711 advisory",
+            "content": "CVE-2018-15711\nGET /nagiosxi/ajaxhelper.php?cmd=x HTTP/1.1\nHost: t\n\n",
+            "poc_evidence": {
+                "code_blocks": [{"text": "GET /nagiosxi/ajaxhelper.php?cmd=x HTTP/1.1\nHost: t\n\n"}],
+            },
+        }
+        state = CVEState(
+            cve_id="CVE-2018-15711",
+            poc_candidates=[deferred],
+            current_candidate_index=-1,
+            reference_contents=[evidence_page],
+            phases_tried=[
+                "local_kb_search", "reference_analysis", "poc_from_refs_yaml",
+                "nuclei_search", "poc_in_github", "exploitdb_search",
+                "imfht_search", "web_search_yaml",
+            ],
+        )
+        with patch("cve_hunter.graph.console.quiet", True):
+            self.assertEqual(_deferred_fallback_update(state), {})
+            nxt = _next_attempt_or_phase_update(state)
+        self.assertNotEqual(nxt.get("current_phase"), "verify_poc")
+        self.assertNotEqual(nxt.get("poc_source"), "local_kb_poc0911")
+
+    def test_http_evidence_poc0911_hit_is_not_final_success(self):
+        deferred = _raw_http_candidates([_raw("/old")], source="local_kb_poc0911")[0]
+        deferred["reference_only"] = True
+        evidence = _raw_http_candidates([_raw("/evidence")], source="reference")[0]
+        evidence_page = {
+            "url": "https://example.test/CVE-2018-15711",
+            "title": "CVE-2018-15711 advisory",
+            "content": "CVE-2018-15711\nGET /evidence HTTP/1.1\nHost: t\n\n",
+            "poc_evidence": {
+                "code_blocks": [{"text": "GET /evidence HTTP/1.1\nHost: t\n\n"}],
+            },
+        }
+        state = CVEState(
+            cve_id="CVE-2018-15711",
+            poc_candidates=[deferred, evidence],
+            current_candidate_index=0,
+            poc_source="local_kb_poc0911",
+            poc_raw_http=deferred["raw_http"],
+            reference_contents=[evidence_page],
+            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs_yaml"],
+        )
+        result = {
+            "success": True,
+            "status_code": 200,
+            "body": "",
+            "ips_matches": [{"cve": "CVE-2018-15711", "cve_list": ["CVE-2018-15711"]}],
+        }
+        with (
+            patch("cve_hunter.graph.execute_candidate", return_value=result),
+            patch("cve_hunter.graph.run_critic_agent", return_value={
+                "candidate": deferred,
+                "review": {"accepted": True},
+                "trace": {"agent": "CriticAgent", "action": "review", "status": "passed", "summary": "ok"},
+            }),
+            patch("cve_hunter.graph.console.quiet", True),
+        ):
+            update = node_verify_poc(state)
+        self.assertNotEqual(update.get("status"), "SUCCESS")
+        self.assertNotEqual(update.get("current_phase"), "archive")
+        self.assertEqual(update.get("current_phase"), "verify_poc")
+        self.assertEqual(update.get("current_candidate_index"), 1)
+        self.assertIn("/evidence", update.get("poc_raw_http", ""))
+
+    def test_new_candidates_are_dispatched_immediately_after_prior_attempt(self):
+        first = _raw_http_candidates([_raw("/first")], source="local_kb_poc0911")[0]
+        state = CVEState(
+            poc_candidates=[first],
+            current_candidate_index=0,
+            attempt_history=[{"candidate_index": 0, "request_success": True}],
+            phases_tried=["local_kb_search", "reference_analysis"],
+        )
+        second = _raw_http_candidates([_raw("/generated")], source="reference")[0]
+
+        update = _candidate_update(state, [second], fallback_phase="poc_from_refs_yaml")
+        dispatched = replace(state, **update)
+
+        self.assertEqual(update["current_phase"], "verify_poc")
+        self.assertEqual(update["current_candidate_index"], 1)
+        self.assertEqual(route_after_phase(dispatched), "verify_poc")
+        self.assertIn("/generated", update["poc_raw_http"])
+
+    def test_attempt_ledger_skips_already_sent_candidates(self):
+        candidates = _raw_http_candidates(
+            [_raw("/first"), _raw("/second"), _raw("/third")], source="reference"
+        )
+        state = CVEState(
+            poc_candidates=candidates,
+            current_candidate_index=2,
+            attempt_history=[
+                {"candidate_index": 0, "request_success": True},
+                {"candidate_index": 2, "request_success": True},
+            ],
+        )
+
+        update = _next_attempt_or_phase_update(state)
 
         self.assertEqual(update["current_phase"], "verify_poc")
         self.assertEqual(update["current_candidate_index"], 1)
@@ -158,7 +348,7 @@ class GraphCandidateTests(unittest.TestCase):
         state = CVEState(
             poc_candidates=candidates,
             current_candidate_index=1,
-            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs"],
+            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs_yaml"],
         )
 
         update = _next_attempt_or_phase_update(state)
@@ -198,7 +388,7 @@ class GraphCandidateTests(unittest.TestCase):
             current_candidate_index=0,
             poc_source="reference",
             poc_raw_http=candidates[0]["raw_http"],
-            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs"],
+            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs_yaml"],
         )
 
         with (
@@ -231,7 +421,7 @@ class GraphCandidateTests(unittest.TestCase):
             current_candidate_index=0,
             poc_source="reference",
             poc_raw_http=candidates[0]["raw_http"],
-            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs"],
+            phases_tried=["local_kb_search", "reference_analysis", "poc_from_refs_yaml"],
         )
 
         with (
@@ -261,7 +451,7 @@ class GraphCandidateTests(unittest.TestCase):
         )
 
         with patch("cve_hunter.graph.console.quiet", True):
-            update = node_poc_from_refs(state)
+            update = node_poc_from_refs_yaml(state)
 
         self.assertEqual(update["current_phase"], "reference_analysis")
         self.assertNotIn("phases_tried", update)

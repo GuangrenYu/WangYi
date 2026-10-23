@@ -22,6 +22,9 @@ class CVEState:
     output_dir: str = ""
     target_ip: str = ""
     local_only: bool = False
+    # Web batch fast path: local KB/NVD context plus official Nuclei first,
+    # then stop instead of waiting through every remote provider.
+    fast_mode: bool = False
     allow_reference_links: bool = False
     environment_discovery: bool = False
 
@@ -42,7 +45,7 @@ class CVEState:
     protocol: str = "http"
 
     # ── PoC 相关 ──
-    reference_contents: list[dict[str, str]] = field(default_factory=list)
+    reference_contents: list[dict[str, Any]] = field(default_factory=list)
     poc_source: str = ""  # reference / nuclei / exploitdb / imfht / search / ai
     poc_raw_http: str = ""
     poc_nuclei_yaml: str = ""
@@ -50,6 +53,8 @@ class CVEState:
     poc_candidates: list[dict[str, Any]] = field(default_factory=list)
     current_candidate_index: int = 0
     attempt_history: list[dict[str, Any]] = field(default_factory=list)
+    # Cached source text for evidence-backed Nuclei HTTP template generation.
+    web_search_context: str = ""
     # 非 HTTP 结构化执行规格（数据库优先）
     execution_spec: dict[str, Any] = field(default_factory=dict)
 
@@ -65,6 +70,7 @@ class CVEState:
     validation_hints: list[dict[str, Any]] = field(default_factory=list)
     candidate_reviews: list[dict[str, Any]] = field(default_factory=list)
     milestones: dict[str, dict[str, Any]] = field(default_factory=dict)
+    llm_usage: dict[str, Any] = field(default_factory=dict)
 
     # ── 验证结果 ──
     http_status_code: int = 0

@@ -1,0 +1,14 @@
+﻿scope,cve_id,purpose,calls,cache_hits,reported_tokens,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,unknown_calls,pending_calls,errors,usage_incomplete
+batch,,,8,0,26323,21027,5296,11238,4278,3,0,3,True
+cve,CVE-2018-15711,,2,0,3004,2310,694,2048,618,1,0,1,True
+purpose,CVE-2018-15711,vulnerability_classification,1,0,3004,2310,694,2048,618,0,0,0,False
+purpose,CVE-2018-15711,poc_from_refs_yaml,1,0,0,0,0,0,0,1,0,1,True
+cve,CVE-2019-3394,,2,0,17472,13788,3684,4710,2873,0,0,0,False
+purpose,CVE-2019-3394,vulnerability_classification,1,0,3088,2508,580,2048,493,0,0,0,False
+purpose,CVE-2019-3394,poc_from_refs_yaml,1,0,14384,11280,3104,2662,2380,0,0,0,False
+cve,CVE-2019-0227,,2,0,2751,2358,393,2048,319,1,0,1,True
+purpose,CVE-2019-0227,vulnerability_classification,1,0,2751,2358,393,2048,319,0,0,0,False
+purpose,CVE-2019-0227,poc_from_refs_yaml,1,0,0,0,0,0,0,1,0,1,True
+cve,CVE-2018-16621,,2,0,3096,2571,525,2432,468,1,0,1,True
+purpose,CVE-2018-16621,vulnerability_classification,1,0,3096,2571,525,2432,468,0,0,0,False
+purpose,CVE-2018-16621,poc_from_refs_yaml,1,0,0,0,0,0,0,1,0,1,True

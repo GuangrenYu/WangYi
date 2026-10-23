@@ -1,0 +1,100 @@
+{
+  "task_id": "25f302d0d79f",
+  "created_at": "2026-10-16T22:29:27.909815+08:00",
+  "updated_at": "2026-10-16T22:32:58.594550+08:00",
+  "status": "completed",
+  "timezone": "Asia/Shanghai",
+  "usage": {
+    "calls": 2,
+    "cache_hits": 0,
+    "reported_tokens": 3568,
+    "input_tokens": 3065,
+    "output_tokens": 503,
+    "cached_input_tokens": 166,
+    "reasoning_tokens": 321,
+    "unknown_calls": 1,
+    "pending_calls": 0,
+    "errors": 1,
+    "usage_incomplete": true,
+    "by_purpose": {
+      "vulnerability_classification": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3568,
+        "input_tokens": 3065,
+        "output_tokens": 503,
+        "cached_input_tokens": 166,
+        "reasoning_tokens": 321,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false
+      },
+      "poc_from_refs_yaml": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cached_input_tokens": 0,
+        "reasoning_tokens": 0,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true
+      }
+    }
+  },
+  "notes": [
+    "Totals use relay-reported total_tokens; token categories may overlap.",
+    "Cached input is part of input tokens. Reasoning may already be in output or total.",
+    "Unknown and pending calls may incur charges; missing usage is never treated as a known zero."
+  ],
+  "cves": {
+    "CVE-2019-0227": {
+      "status": "failed",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 3568,
+        "input_tokens": 3065,
+        "output_tokens": 503,
+        "cached_input_tokens": 166,
+        "reasoning_tokens": 321,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3568,
+            "input_tokens": 3065,
+            "output_tokens": 503,
+            "cached_input_tokens": 166,
+            "reasoning_tokens": 321,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "54325d5e717a4881908a551a2395747d"
+      }
+    }
+  }
+}

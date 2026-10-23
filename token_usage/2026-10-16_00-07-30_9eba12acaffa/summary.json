@@ -1,0 +1,36 @@
+{
+  "task_id": "9eba12acaffa",
+  "created_at": "2026-10-16T00:07:30.348873+08:00",
+  "updated_at": "2026-10-16T00:07:30.350804+08:00",
+  "status": "cancelled",
+  "timezone": "Asia/Shanghai",
+  "usage": {
+    "calls": 0,
+    "cache_hits": 0,
+    "reported_tokens": 0,
+    "input_tokens": 0,
+    "output_tokens": 0,
+    "cached_input_tokens": 0,
+    "reasoning_tokens": 0,
+    "unknown_calls": 0,
+    "pending_calls": 0,
+    "errors": 0,
+    "usage_incomplete": false,
+    "by_purpose": {}
+  },
+  "notes": [
+    "Totals use relay-reported total_tokens; token categories may overlap.",
+    "Cached input is part of input tokens. Reasoning may already be in output or total.",
+    "Unknown and pending calls may incur charges; missing usage is never treated as a known zero."
+  ],
+  "cves": {
+    "CVE-2025-0001": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-0002": {
+      "status": "cancelled",
+      "usage": {}
+    }
+  }
+}

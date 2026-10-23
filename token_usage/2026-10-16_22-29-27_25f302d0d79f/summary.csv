@@ -1,0 +1,5 @@
+﻿scope,cve_id,purpose,calls,cache_hits,reported_tokens,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,unknown_calls,pending_calls,errors,usage_incomplete
+batch,,,2,0,3568,3065,503,166,321,1,0,1,True
+cve,CVE-2019-0227,,2,0,3568,3065,503,166,321,1,0,1,True
+purpose,CVE-2019-0227,vulnerability_classification,1,0,3568,3065,503,166,321,0,0,0,False
+purpose,CVE-2019-0227,poc_from_refs_yaml,1,0,0,0,0,0,0,1,0,1,True

@@ -1,0 +1,183 @@
+mode: rule
+ipv6: false
+log-level: info
+allow-lan: true
+mixed-port: 7890
+geodata-mode: true
+geodata-loader: standard
+dns:
+    enable: true
+    ipv6: false
+    enhanced-mode: fake-ip
+    fake-ip-range: 198.18.0.1/16
+    use-hosts: true
+    respect-rules: true
+    prefer-h3: false
+    proxy-server-nameserver: [223.5.5.5, 119.29.29.29]
+    default-nameserver: [223.5.5.5, 119.29.29.29, 114.114.114.114]
+    direct-nameserver: [223.5.5.5, 119.29.29.29]
+    nameserver: [223.5.5.5, 119.29.29.29, 'https://dns.alidns.com/dns-query', 'https://doh.pub/dns-query']
+    fallback: ['https://1.1.1.1/dns-query', 'https://8.8.8.8/dns-query']
+    fallback-filter: { geoip: true, geoip-code: CN, ipcidr: [0.0.0.0/8, 10.0.0.0/8, 100.64.0.0/10, 127.0.0.0/8, 169.254.0.0/16, 172.16.0.0/12, 192.168.0.0/16, 224.0.0.0/4, 240.0.0.0/4] }
+    nameserver-policy: { 'geosite:cn,private': [223.5.5.5, 119.29.29.29], 'geosite:geolocation-!cn': ['https://1.1.1.1/dns-query', 8.8.8.8], '+.google.com,+.googleapis.com,+.googlevideo.com,+.youtube.com': ['https://1.1.1.1/dns-query', 8.8.8.8], '+.openai.com,+.chatgpt.com,+.anthropic.com': ['https://1.1.1.1/dns-query', 8.8.8.8] }
+    fake-ip-filter: ['*.lan', '*.local', '*.localhost', '*.test', 'time.*.com', 'ntp.*.com', 'time.*.gov', time.apple.com, localhost.ptlogin2.qq.com, localhost.sec.qq.com, +.servicewechat.com, '+.stun.*.*', '+.stun.*.*.*', '+.stun.*.*.*.*', lens.l.google.com, '*.srv.nintendo.net', +.stun.playstation.net, 'xbox.*.*.microsoft.com', '*.*.xboxlive.com', +.msftncsi.com, +.msftconnecttest.com, +.qq.com, +.tencent.com, +.weixin.com, +.wechat.com, +.tenpay.com, +.alibaba.com, +.alipay.com, +.taobao.com, +.tmall.com, +.aliyun.com, +.baidu.com, +.bilibili.com, +.bdstatic.com]
+proxies:
+    - { name: '剩余流量：64.74 GB', type: vless, server: 209.248.59.184, port: 25666, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.speedtest.net, reality-opts: { public-key: q6Ol0MCckrxZGc0V_wUzbTlXuvh6gwpXiFuqofVDfyQ, short-id: 729c3721f2d7d8 }, client-fingerprint: chrome, network: tcp }
+    - { name: '距离下次重置剩余：13 天', type: vless, server: 209.248.59.184, port: 25666, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.speedtest.net, reality-opts: { public-key: q6Ol0MCckrxZGc0V_wUzbTlXuvh6gwpXiFuqofVDfyQ, short-id: 729c3721f2d7d8 }, client-fingerprint: chrome, network: tcp }
+    - { name: 套餐到期：2026-10-19, type: vless, server: 209.248.59.184, port: 25666, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.speedtest.net, reality-opts: { public-key: q6Ol0MCckrxZGc0V_wUzbTlXuvh6gwpXiFuqofVDfyQ, short-id: 729c3721f2d7d8 }, client-fingerprint: chrome, network: tcp }
+    - { name: '美国[低倍率] 0.5x', type: vless, server: 209.248.59.184, port: 25666, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.speedtest.net, reality-opts: { public-key: q6Ol0MCckrxZGc0V_wUzbTlXuvh6gwpXiFuqofVDfyQ, short-id: 729c3721f2d7d8 }, client-fingerprint: chrome, network: tcp }
+    - { name: '香港[低倍率] 0.3x', type: vless, server: 103.197.71.70, port: 25666, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.speedtest.net, reality-opts: { public-key: q6Ol0MCckrxZGc0V_wUzbTlXuvh6gwpXiFuqofVDfyQ, short-id: 729c3721f2d7d8 }, client-fingerprint: chrome, network: tcp }
+    - { name: '香港[三网优化] 1x A', type: vless, server: hktwaaaaa.selom.online, port: 28577, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: R3yEQBiZkWg6zitxQC5ET0HWDQzzuIx-81BQw_8vSU4, short-id: f7042a }, client-fingerprint: chrome, network: tcp }
+    - { name: '香港[三网优化] 1x B', type: vless, server: hktwaaaaa.selom.online, port: 28577, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: R3yEQBiZkWg6zitxQC5ET0HWDQzzuIx-81BQw_8vSU4, short-id: f7042a }, client-fingerprint: chrome, network: tcp }
+    - { name: '香港[三网优化] 1x C', type: vless, server: hktwbbbbb.selom.online, port: 28577, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: R3yEQBiZkWg6zitxQC5ET0HWDQzzuIx-81BQw_8vSU4, short-id: f7042a }, client-fingerprint: chrome, network: tcp }
+    - { name: '香港[三网优化] 1x D', type: vless, server: hktwbbbbb.selom.online, port: 28577, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: R3yEQBiZkWg6zitxQC5ET0HWDQzzuIx-81BQw_8vSU4, short-id: f7042a }, client-fingerprint: chrome, network: tcp }
+    - { name: '日本[三网优化] 1x A', type: vless, server: jpaaaaa.sly666.xyz, port: 63058, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: P__wlwPhQHaL6xDf9mc-X-Rae0e99892t-CTdCtosnI, short-id: a5f74ddc9657 }, client-fingerprint: chrome, network: tcp }
+    - { name: '日本[三网优化] 1x B', type: vless, server: jpaaaaa.sly666.xyz, port: 63058, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: P__wlwPhQHaL6xDf9mc-X-Rae0e99892t-CTdCtosnI, short-id: a5f74ddc9657 }, client-fingerprint: chrome, network: tcp }
+    - { name: '日本[三网优化] 1x C', type: vless, server: jpbbbbb.sly666.xyz, port: 63058, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: P__wlwPhQHaL6xDf9mc-X-Rae0e99892t-CTdCtosnI, short-id: a5f74ddc9657 }, client-fingerprint: chrome, network: tcp }
+    - { name: '日本[三网优化] 1x D', type: vless, server: jpbbbbb.sly666.xyz, port: 63058, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: P__wlwPhQHaL6xDf9mc-X-Rae0e99892t-CTdCtosnI, short-id: a5f74ddc9657 }, client-fingerprint: chrome, network: tcp }
+    - { name: '台湾[三网优化] 1x A', type: vless, server: hktwaaaaa.selom.online, port: 25948, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: L6VPs3YWh7V7wgTULZ0YzGUOH2ZaXPjcvWqGZ04m6GA, short-id: dd7a53d1593a }, client-fingerprint: chrome, network: tcp }
+    - { name: '台湾[三网优化] 1x B', type: vless, server: hktwaaaaa.selom.online, port: 25948, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: L6VPs3YWh7V7wgTULZ0YzGUOH2ZaXPjcvWqGZ04m6GA, short-id: dd7a53d1593a }, client-fingerprint: chrome, network: tcp }
+    - { name: '台湾[三网优化] 1x C', type: vless, server: hktwbbb.selom.online, port: 25948, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: L6VPs3YWh7V7wgTULZ0YzGUOH2ZaXPjcvWqGZ04m6GA, short-id: dd7a53d1593a }, client-fingerprint: chrome, network: tcp }
+    - { name: '台湾[三网优化] 1x D', type: vless, server: hktwbbb.selom.online, port: 25948, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: L6VPs3YWh7V7wgTULZ0YzGUOH2ZaXPjcvWqGZ04m6GA, short-id: dd7a53d1593a }, client-fingerprint: chrome, network: tcp }
+    - { name: '新加坡[三网优化] 1x A', type: vless, server: sgsgaaaaa.selom.online, port: 23221, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: oOPDu0bT6bKWdLKoiZuR8nramkIRsydCEGSo7zQJQy0, short-id: 449f1e42a0e046 }, client-fingerprint: chrome, network: tcp }
+    - { name: '新加坡[三网优化] 1x B', type: vless, server: sgsgaaaaa.selom.online, port: 23221, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: oOPDu0bT6bKWdLKoiZuR8nramkIRsydCEGSo7zQJQy0, short-id: 449f1e42a0e046 }, client-fingerprint: chrome, network: tcp }
+    - { name: '新加坡[三网优化] 1x C', type: vless, server: sgsgbbbbb.selom.online, port: 23221, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: oOPDu0bT6bKWdLKoiZuR8nramkIRsydCEGSo7zQJQy0, short-id: 449f1e42a0e046 }, client-fingerprint: chrome, network: tcp }
+    - { name: '新加坡[三网优化] 1x D', type: vless, server: sgsgbbbbb.selom.online, port: 23221, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: oOPDu0bT6bKWdLKoiZuR8nramkIRsydCEGSo7zQJQy0, short-id: 449f1e42a0e046 }, client-fingerprint: chrome, network: tcp }
+    - { name: '美国[三网优化] 1x A', type: vless, server: usaaaaa.sly666.xyz, port: 48259, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: mG1WH-6Lor0qn1GtTVPZrGJGrgFNHjapgbrl8_OB2FY, short-id: 97bd152345ea6fe2 }, client-fingerprint: chrome, network: tcp }
+    - { name: '美国[三网优化] 1x B', type: vless, server: usaaaaa.sly666.xyz, port: 48259, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: mG1WH-6Lor0qn1GtTVPZrGJGrgFNHjapgbrl8_OB2FY, short-id: 97bd152345ea6fe2 }, client-fingerprint: chrome, network: tcp }
+    - { name: '美国[三网优化] 1x C', type: vless, server: usbbb.sly666.xyz, port: 48259, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: mG1WH-6Lor0qn1GtTVPZrGJGrgFNHjapgbrl8_OB2FY, short-id: 97bd152345ea6fe2 }, client-fingerprint: chrome, network: tcp }
+    - { name: '美国[三网优化] 1x D', type: vless, server: usbbb.sly666.xyz, port: 48259, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: mG1WH-6Lor0qn1GtTVPZrGJGrgFNHjapgbrl8_OB2FY, short-id: 97bd152345ea6fe2 }, client-fingerprint: chrome, network: tcp }
+    - { name: '香港[三网精品] 2x', type: vless, server: ecs4.ycsh.shop, port: 27385, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: R3yEQBiZkWg6zitxQC5ET0HWDQzzuIx-81BQw_8vSU4, short-id: f7042a }, client-fingerprint: chrome, network: tcp }
+    - { name: '台湾[三网精品] 2x', type: vless, server: ecs4.ycsh.shop, port: 25948, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: L6VPs3YWh7V7wgTULZ0YzGUOH2ZaXPjcvWqGZ04m6GA, short-id: dd7a53d1593a }, client-fingerprint: chrome, network: tcp }
+    - { name: '新加坡[三网精品] 2x', type: vless, server: ecs4.ycsh.shop, port: 23221, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: oOPDu0bT6bKWdLKoiZuR8nramkIRsydCEGSo7zQJQy0, short-id: 449f1e42a0e046 }, client-fingerprint: chrome, network: tcp }
+    - { name: '日本[三网精品] 2x', type: vless, server: ecs4.ycsh.shop, port: 63058, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: P__wlwPhQHaL6xDf9mc-X-Rae0e99892t-CTdCtosnI, short-id: a5f74ddc9657 }, client-fingerprint: chrome, network: tcp }
+    - { name: '美国[三网精品] 2x', type: vless, server: ecs4.ycsh.shop, port: 48259, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: mG1WH-6Lor0qn1GtTVPZrGJGrgFNHjapgbrl8_OB2FY, short-id: 97bd152345ea6fe2 }, client-fingerprint: chrome, network: tcp }
+    - { name: '香港[中转入口] 2x D', type: vless, server: dxgoogle.selom.online, port: 27388, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: true, servername: www.amazon.com, reality-opts: { public-key: R3yEQBiZkWg6zitxQC5ET0HWDQzzuIx-81BQw_8vSU4, short-id: f7042a }, client-fingerprint: chrome, network: tcp }
+    - { name: '日本[中转入口] 2x D', type: vless, server: dxgoogle.selom.online, port: 49945, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: P__wlwPhQHaL6xDf9mc-X-Rae0e99892t-CTdCtosnI, short-id: a5f74ddc9657 }, client-fingerprint: chrome, network: tcp }
+    - { name: '新加坡[中转入口] 2x D', type: vless, server: dxgoogle.selom.online, port: 45138, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.apple.com, reality-opts: { public-key: oOPDu0bT6bKWdLKoiZuR8nramkIRsydCEGSo7zQJQy0, short-id: 449f1e42a0e046 }, client-fingerprint: chrome, network: tcp }
+    - { name: '美国[中转入口] 2x D', type: vless, server: dxgoogle.selom.online, port: 33037, uuid: 14bd8683-fa3f-4a57-811c-cd932d4113d8, alterId: 0, cipher: auto, udp: true, flow: xtls-rprx-vision, encryption: none, tls: true, skip-cert-verify: false, servername: www.amazon.com, reality-opts: { public-key: mG1WH-6Lor0qn1GtTVPZrGJGrgFNHjapgbrl8_OB2FY, short-id: 97bd152345ea6fe2 }, client-fingerprint: chrome, network: tcp }
+    - { name: 防失联节点, type: anytls, server: opt.selom.xyz, port: 25555, password: 14bd8683-fa3f-4a57-811c-cd932d4113d8, udp: true, sni: www.speedtest.net, skip-cert-verify: true }
+    - { name: 请查看官网更换客户端和订阅链接以确保最新体验, type: ss, server: hgfbnhh.slsub.com, port: 19282, cipher: aes-128-gcm, password: 14bd8683-fa3f-4a57-811c-cd932d4113d8, udp: true }
+proxy-groups:
+    - { name: Manual-Select, type: select, proxies: [自动选择, 故障转移, DIRECT, '剩余流量：64.74 GB', '距离下次重置剩余：13 天', 套餐到期：2026-10-19, '美国[低倍率] 0.5x', '香港[低倍率] 0.3x', '香港[三网优化] 1x A', '香港[三网优化] 1x B', '香港[三网优化] 1x C', '香港[三网优化] 1x D', '日本[三网优化] 1x A', '日本[三网优化] 1x B', '日本[三网优化] 1x C', '日本[三网优化] 1x D', '台湾[三网优化] 1x A', '台湾[三网优化] 1x B', '台湾[三网优化] 1x C', '台湾[三网优化] 1x D', '新加坡[三网优化] 1x A', '新加坡[三网优化] 1x B', '新加坡[三网优化] 1x C', '新加坡[三网优化] 1x D', '美国[三网优化] 1x A', '美国[三网优化] 1x B', '美国[三网优化] 1x C', '美国[三网优化] 1x D', '香港[三网精品] 2x', '台湾[三网精品] 2x', '新加坡[三网精品] 2x', '日本[三网精品] 2x', '美国[三网精品] 2x', '香港[中转入口] 2x D', '日本[中转入口] 2x D', '新加坡[中转入口] 2x D', '美国[中转入口] 2x D', 防失联节点, 请查看官网更换客户端和订阅链接以确保最新体验] }
+    - { name: OpenAI, type: select, proxies: [Manual-Select, 自动选择, 故障转移, '剩余流量：64.74 GB', '距离下次重置剩余：13 天', 套餐到期：2026-10-19, '美国[低倍率] 0.5x', '香港[低倍率] 0.3x', '香港[三网优化] 1x A', '香港[三网优化] 1x B', '香港[三网优化] 1x C', '香港[三网优化] 1x D', '日本[三网优化] 1x A', '日本[三网优化] 1x B', '日本[三网优化] 1x C', '日本[三网优化] 1x D', '台湾[三网优化] 1x A', '台湾[三网优化] 1x B', '台湾[三网优化] 1x C', '台湾[三网优化] 1x D', '新加坡[三网优化] 1x A', '新加坡[三网优化] 1x B', '新加坡[三网优化] 1x C', '新加坡[三网优化] 1x D', '美国[三网优化] 1x A', '美国[三网优化] 1x B', '美国[三网优化] 1x C', '美国[三网优化] 1x D', '香港[三网精品] 2x', '台湾[三网精品] 2x', '新加坡[三网精品] 2x', '日本[三网精品] 2x', '美国[三网精品] 2x', '香港[中转入口] 2x D', '日本[中转入口] 2x D', '新加坡[中转入口] 2x D', '美国[中转入口] 2x D', 防失联节点, 请查看官网更换客户端和订阅链接以确保最新体验] }
+    - { name: YouTube, type: select, proxies: [Manual-Select, 自动选择, 故障转移, '剩余流量：64.74 GB', '距离下次重置剩余：13 天', 套餐到期：2026-10-19, '美国[低倍率] 0.5x', '香港[低倍率] 0.3x', '香港[三网优化] 1x A', '香港[三网优化] 1x B', '香港[三网优化] 1x C', '香港[三网优化] 1x D', '日本[三网优化] 1x A', '日本[三网优化] 1x B', '日本[三网优化] 1x C', '日本[三网优化] 1x D', '台湾[三网优化] 1x A', '台湾[三网优化] 1x B', '台湾[三网优化] 1x C', '台湾[三网优化] 1x D', '新加坡[三网优化] 1x A', '新加坡[三网优化] 1x B', '新加坡[三网优化] 1x C', '新加坡[三网优化] 1x D', '美国[三网优化] 1x A', '美国[三网优化] 1x B', '美国[三网优化] 1x C', '美国[三网优化] 1x D', '香港[三网精品] 2x', '台湾[三网精品] 2x', '新加坡[三网精品] 2x', '日本[三网精品] 2x', '美国[三网精品] 2x', '香港[中转入口] 2x D', '日本[中转入口] 2x D', '新加坡[中转入口] 2x D', '美国[中转入口] 2x D', 防失联节点, 请查看官网更换客户端和订阅链接以确保最新体验] }
+    - { name: Global-Media, type: select, proxies: [Manual-Select, 自动选择, 故障转移, '剩余流量：64.74 GB', '距离下次重置剩余：13 天', 套餐到期：2026-10-19, '美国[低倍率] 0.5x', '香港[低倍率] 0.3x', '香港[三网优化] 1x A', '香港[三网优化] 1x B', '香港[三网优化] 1x C', '香港[三网优化] 1x D', '日本[三网优化] 1x A', '日本[三网优化] 1x B', '日本[三网优化] 1x C', '日本[三网优化] 1x D', '台湾[三网优化] 1x A', '台湾[三网优化] 1x B', '台湾[三网优化] 1x C', '台湾[三网优化] 1x D', '新加坡[三网优化] 1x A', '新加坡[三网优化] 1x B', '新加坡[三网优化] 1x C', '新加坡[三网优化] 1x D', '美国[三网优化] 1x A', '美国[三网优化] 1x B', '美国[三网优化] 1x C', '美国[三网优化] 1x D', '香港[三网精品] 2x', '台湾[三网精品] 2x', '新加坡[三网精品] 2x', '日本[三网精品] 2x', '美国[三网精品] 2x', '香港[中转入口] 2x D', '日本[中转入口] 2x D', '新加坡[中转入口] 2x D', '美国[中转入口] 2x D', 防失联节点, 请查看官网更换客户端和订阅链接以确保最新体验] }
+    - { name: Telegram, type: select, proxies: [Manual-Select, 自动选择, 故障转移, '剩余流量：64.74 GB', '距离下次重置剩余：13 天', 套餐到期：2026-10-19, '美国[低倍率] 0.5x', '香港[低倍率] 0.3x', '香港[三网优化] 1x A', '香港[三网优化] 1x B', '香港[三网优化] 1x C', '香港[三网优化] 1x D', '日本[三网优化] 1x A', '日本[三网优化] 1x B', '日本[三网优化] 1x C', '日本[三网优化] 1x D', '台湾[三网优化] 1x A', '台湾[三网优化] 1x B', '台湾[三网优化] 1x C', '台湾[三网优化] 1x D', '新加坡[三网优化] 1x A', '新加坡[三网优化] 1x B', '新加坡[三网优化] 1x C', '新加坡[三网优化] 1x D', '美国[三网优化] 1x A', '美国[三网优化] 1x B', '美国[三网优化] 1x C', '美国[三网优化] 1x D', '香港[三网精品] 2x', '台湾[三网精品] 2x', '新加坡[三网精品] 2x', '日本[三网精品] 2x', '美国[三网精品] 2x', '香港[中转入口] 2x D', '日本[中转入口] 2x D', '新加坡[中转入口] 2x D', '美国[中转入口] 2x D', 防失联节点, 请查看官网更换客户端和订阅链接以确保最新体验] }
+    - { name: Github, type: select, proxies: [Manual-Select, 自动选择, 故障转移, '剩余流量：64.74 GB', '距离下次重置剩余：13 天', 套餐到期：2026-10-19, '美国[低倍率] 0.5x', '香港[低倍率] 0.3x', '香港[三网优化] 1x A', '香港[三网优化] 1x B', '香港[三网优化] 1x C', '香港[三网优化] 1x D', '日本[三网优化] 1x A', '日本[三网优化] 1x B', '日本[三网优化] 1x C', '日本[三网优化] 1x D', '台湾[三网优化] 1x A', '台湾[三网优化] 1x B', '台湾[三网优化] 1x C', '台湾[三网优化] 1x D', '新加坡[三网优化] 1x A', '新加坡[三网优化] 1x B', '新加坡[三网优化] 1x C', '新加坡[三网优化] 1x D', '美国[三网优化] 1x A', '美国[三网优化] 1x B', '美国[三网优化] 1x C', '美国[三网优化] 1x D', '香港[三网精品] 2x', '台湾[三网精品] 2x', '新加坡[三网精品] 2x', '日本[三网精品] 2x', '美国[三网精品] 2x', '香港[中转入口] 2x D', '日本[中转入口] 2x D', '新加坡[中转入口] 2x D', '美国[中转入口] 2x D', 防失联节点, 请查看官网更换客户端和订阅链接以确保最新体验] }
+    - { name: 自动选择, type: url-test, url: 'http://www.gstatic.com/generate_204', interval: 300, tolerance: 50, proxies: ['剩余流量：64.74 GB', '距离下次重置剩余：13 天', 套餐到期：2026-10-19, '美国[低倍率] 0.5x', '香港[低倍率] 0.3x', '香港[三网优化] 1x A', '香港[三网优化] 1x B', '香港[三网优化] 1x C', '香港[三网优化] 1x D', '日本[三网优化] 1x A', '日本[三网优化] 1x B', '日本[三网优化] 1x C', '日本[三网优化] 1x D', '台湾[三网优化] 1x A', '台湾[三网优化] 1x B', '台湾[三网优化] 1x C', '台湾[三网优化] 1x D', '新加坡[三网优化] 1x A', '新加坡[三网优化] 1x B', '新加坡[三网优化] 1x C', '新加坡[三网优化] 1x D', '美国[三网优化] 1x A', '美国[三网优化] 1x B', '美国[三网优化] 1x C', '美国[三网优化] 1x D', '香港[三网精品] 2x', '台湾[三网精品] 2x', '新加坡[三网精品] 2x', '日本[三网精品] 2x', '美国[三网精品] 2x', '香港[中转入口] 2x D', '日本[中转入口] 2x D', '新加坡[中转入口] 2x D', '美国[中转入口] 2x D', 防失联节点, 请查看官网更换客户端和订阅链接以确保最新体验] }
+    - { name: 故障转移, type: fallback, url: 'http://www.gstatic.com/generate_204', interval: 300, proxies: ['剩余流量：64.74 GB', '距离下次重置剩余：13 天', 套餐到期：2026-10-19, '美国[低倍率] 0.5x', '香港[低倍率] 0.3x', '香港[三网优化] 1x A', '香港[三网优化] 1x B', '香港[三网优化] 1x C', '香港[三网优化] 1x D', '日本[三网优化] 1x A', '日本[三网优化] 1x B', '日本[三网优化] 1x C', '日本[三网优化] 1x D', '台湾[三网优化] 1x A', '台湾[三网优化] 1x B', '台湾[三网优化] 1x C', '台湾[三网优化] 1x D', '新加坡[三网优化] 1x A', '新加坡[三网优化] 1x B', '新加坡[三网优化] 1x C', '新加坡[三网优化] 1x D', '美国[三网优化] 1x A', '美国[三网优化] 1x B', '美国[三网优化] 1x C', '美国[三网优化] 1x D', '香港[三网精品] 2x', '台湾[三网精品] 2x', '新加坡[三网精品] 2x', '日本[三网精品] 2x', '美国[三网精品] 2x', '香港[中转入口] 2x D', '日本[中转入口] 2x D', '新加坡[中转入口] 2x D', '美国[中转入口] 2x D', 防失联节点, 请查看官网更换客户端和订阅链接以确保最新体验] }
+rules:
+    - 'DOMAIN,orange.slsub.com,DIRECT'
+    - 'DOMAIN-KEYWORD,admarvel,REJECT'
+    - 'DOMAIN-KEYWORD,admaster,REJECT'
+    - 'DOMAIN-KEYWORD,adsage,REJECT'
+    - 'DOMAIN-KEYWORD,adsmogo,REJECT'
+    - 'DOMAIN-KEYWORD,adsrvmedia,REJECT'
+    - 'DOMAIN-KEYWORD,adwords,REJECT'
+    - 'DOMAIN-KEYWORD,adservice,REJECT'
+    - 'DOMAIN-KEYWORD,domob,REJECT'
+    - 'DOMAIN-KEYWORD,duomeng,REJECT'
+    - 'DOMAIN-KEYWORD,dwtrack,REJECT'
+    - 'DOMAIN-KEYWORD,guanggao,REJECT'
+    - 'DOMAIN-KEYWORD,lianmeng,REJECT'
+    - 'DOMAIN-KEYWORD,omgmta,REJECT'
+    - 'DOMAIN-KEYWORD,openx,REJECT'
+    - 'DOMAIN-KEYWORD,partnerad,REJECT'
+    - 'DOMAIN-KEYWORD,supersonicads,REJECT'
+    - 'DOMAIN-KEYWORD,umeng,REJECT'
+    - 'DOMAIN-KEYWORD,zjtoolbar,REJECT'
+    - 'DOMAIN-SUFFIX,appsflyer.com,REJECT'
+    - 'DOMAIN-SUFFIX,doubleclick.net,REJECT'
+    - 'DOMAIN-SUFFIX,mmstat.com,REJECT'
+    - 'DOMAIN-SUFFIX,local,DIRECT'
+    - 'DOMAIN-SUFFIX,localhost,DIRECT'
+    - 'IP-CIDR,10.0.0.0/8,DIRECT,no-resolve'
+    - 'IP-CIDR,17.0.0.0/8,DIRECT,no-resolve'
+    - 'IP-CIDR,100.64.0.0/10,DIRECT,no-resolve'
+    - 'IP-CIDR,127.0.0.0/8,DIRECT,no-resolve'
+    - 'IP-CIDR,172.16.0.0/12,DIRECT,no-resolve'
+    - 'IP-CIDR,192.168.0.0/16,DIRECT,no-resolve'
+    - 'IP-CIDR,198.18.0.0/16,DIRECT,no-resolve'
+    - 'IP-CIDR,224.0.0.0/4,DIRECT,no-resolve'
+    - 'IP-CIDR6,::1/128,DIRECT,no-resolve'
+    - 'IP-CIDR6,fc00::/7,DIRECT,no-resolve'
+    - 'IP-CIDR6,fe80::/10,DIRECT,no-resolve'
+    - 'DOMAIN-KEYWORD,openai,OpenAI'
+    - 'DOMAIN-KEYWORD,chatgpt,OpenAI'
+    - 'DOMAIN-KEYWORD,anthropic,OpenAI'
+    - 'DOMAIN-KEYWORD,claude,OpenAI'
+    - 'DOMAIN-SUFFIX,oaistatic.com,OpenAI'
+    - 'DOMAIN-SUFFIX,oaiusercontent.com,OpenAI'
+    - 'DOMAIN-KEYWORD,youtube,YouTube'
+    - 'DOMAIN-KEYWORD,googlevideo,YouTube'
+    - 'DOMAIN-SUFFIX,youtu.be,YouTube'
+    - 'DOMAIN-SUFFIX,ytimg.com,YouTube'
+    - 'DOMAIN-KEYWORD,telegram,Telegram'
+    - 'DOMAIN-SUFFIX,t.me,Telegram'
+    - 'IP-CIDR,91.108.4.0/22,Telegram,no-resolve'
+    - 'IP-CIDR,149.154.160.0/20,Telegram,no-resolve'
+    - 'DOMAIN-KEYWORD,github,Github'
+    - 'DOMAIN-SUFFIX,githubusercontent.com,Github'
+    - 'DOMAIN-SUFFIX,githubassets.com,Github'
+    - 'DOMAIN-KEYWORD,netflix,Global-Media'
+    - 'DOMAIN-KEYWORD,nflxso,Global-Media'
+    - 'DOMAIN-SUFFIX,netflix.com,Global-Media'
+    - 'DOMAIN-SUFFIX,apps.apple.com,Manual-Select'
+    - 'DOMAIN-SUFFIX,itunes.apple.com,Manual-Select'
+    - 'DOMAIN-SUFFIX,blobstore.apple.com,Manual-Select'
+    - 'DOMAIN,safebrowsing.urlsec.qq.com,DIRECT'
+    - 'DOMAIN-SUFFIX,apple.com,DIRECT'
+    - 'DOMAIN-SUFFIX,apple-cloudkit.com,DIRECT'
+    - 'DOMAIN-SUFFIX,icloud.com,DIRECT'
+    - 'DOMAIN-SUFFIX,icloud-content.com,DIRECT'
+    - 'DOMAIN-SUFFIX,mzstatic.com,DIRECT'
+    - 'DOMAIN-SUFFIX,aaplimg.com,DIRECT'
+    - 'DOMAIN-SUFFIX,cdn-apple.com,DIRECT'
+    - 'DOMAIN-SUFFIX,akadns.net,DIRECT'
+    - 'DOMAIN-KEYWORD,google,Manual-Select'
+    - 'DOMAIN-KEYWORD,gmail,Manual-Select'
+    - 'DOMAIN-KEYWORD,facebook,Manual-Select'
+    - 'DOMAIN-KEYWORD,twitter,Manual-Select'
+    - 'DOMAIN-KEYWORD,instagram,Manual-Select'
+    - 'DOMAIN-SUFFIX,t.co,Manual-Select'
+    - 'DOMAIN-SUFFIX,x.com,Manual-Select'
+    - 'DOMAIN-SUFFIX,v2ex.com,Manual-Select'
+    - 'DOMAIN-SUFFIX,reddit.com,Manual-Select'
+    - 'DOMAIN-KEYWORD,baidu,DIRECT'
+    - 'DOMAIN-KEYWORD,alibaba,DIRECT'
+    - 'DOMAIN-KEYWORD,alicdn,DIRECT'
+    - 'DOMAIN-KEYWORD,alipay,DIRECT'
+    - 'DOMAIN-KEYWORD,taobao,DIRECT'
+    - 'DOMAIN-KEYWORD,tencent,DIRECT'
+    - 'DOMAIN-KEYWORD,bilibili,DIRECT'
+    - 'DOMAIN-KEYWORD,weibo,DIRECT'
+    - 'DOMAIN-KEYWORD,douyin,DIRECT'
+    - 'DOMAIN-KEYWORD,bytedance,DIRECT'
+    - 'DOMAIN-KEYWORD,xiaomi,DIRECT'
+    - 'DOMAIN-KEYWORD,huawei,DIRECT'
+    - 'DOMAIN-KEYWORD,netease,DIRECT'
+    - 'DOMAIN-KEYWORD,meituan,DIRECT'
+    - 'DOMAIN-KEYWORD,pinduoduo,DIRECT'
+    - 'DOMAIN-KEYWORD,kuaishou,DIRECT'
+    - 'DOMAIN-KEYWORD,jingdong,DIRECT'
+    - 'DOMAIN-KEYWORD,officecdn,DIRECT'
+    - 'DOMAIN-SUFFIX,qq.com,DIRECT'
+    - 'DOMAIN-SUFFIX,weixin.com,DIRECT'
+    - 'DOMAIN-SUFFIX,wechat.com,DIRECT'
+    - 'DOMAIN-SUFFIX,tmall.com,DIRECT'
+    - 'DOMAIN-SUFFIX,jd.com,DIRECT'
+    - 'DOMAIN-SUFFIX,iqiyi.com,DIRECT'
+    - 'DOMAIN-SUFFIX,youku.com,DIRECT'
+    - 'DOMAIN-SUFFIX,zhihu.com,DIRECT'
+    - 'DOMAIN-SUFFIX,163.com,DIRECT'
+    - 'DOMAIN-SUFFIX,sina.com,DIRECT'
+    - 'DOMAIN-SUFFIX,csdn.net,DIRECT'
+    - 'DOMAIN-SUFFIX,mi.com,DIRECT'
+    - 'DOMAIN-SUFFIX,microsoft.com,DIRECT'
+    - 'DOMAIN-SUFFIX,office.com,DIRECT'
+    - 'DOMAIN-SUFFIX,windows.com,DIRECT'
+    - 'DOMAIN-SUFFIX,cn,DIRECT'
+    - 'DOMAIN-KEYWORD,-cn,DIRECT'
+    - 'GEOIP,CN,DIRECT'
+    - 'MATCH,Manual-Select'

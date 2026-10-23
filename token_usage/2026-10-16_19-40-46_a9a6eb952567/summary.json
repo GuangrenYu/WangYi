@@ -1,0 +1,235 @@
+{
+  "task_id": "a9a6eb952567",
+  "created_at": "2026-10-16T19:40:46.134374+08:00",
+  "updated_at": "2026-10-16T19:43:30.857710+08:00",
+  "status": "completed",
+  "timezone": "Asia/Shanghai",
+  "usage": {
+    "calls": 8,
+    "cache_hits": 0,
+    "reported_tokens": 26323,
+    "input_tokens": 21027,
+    "output_tokens": 5296,
+    "cached_input_tokens": 11238,
+    "reasoning_tokens": 4278,
+    "unknown_calls": 3,
+    "pending_calls": 0,
+    "errors": 3,
+    "usage_incomplete": true,
+    "by_purpose": {
+      "vulnerability_classification": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 11939,
+        "input_tokens": 9747,
+        "output_tokens": 2192,
+        "cached_input_tokens": 8576,
+        "reasoning_tokens": 1898,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false
+      },
+      "poc_from_refs_yaml": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 14384,
+        "input_tokens": 11280,
+        "output_tokens": 3104,
+        "cached_input_tokens": 2662,
+        "reasoning_tokens": 2380,
+        "unknown_calls": 3,
+        "pending_calls": 0,
+        "errors": 3,
+        "usage_incomplete": true
+      }
+    }
+  },
+  "notes": [
+    "Totals use relay-reported total_tokens; token categories may overlap.",
+    "Cached input is part of input tokens. Reasoning may already be in output or total.",
+    "Unknown and pending calls may incur charges; missing usage is never treated as a known zero."
+  ],
+  "cves": {
+    "CVE-2018-15711": {
+      "status": "failed",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 3004,
+        "input_tokens": 2310,
+        "output_tokens": 694,
+        "cached_input_tokens": 2048,
+        "reasoning_tokens": 618,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3004,
+            "input_tokens": 2310,
+            "output_tokens": 694,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 618,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "cce1ab85f53149d18c26519e9175669c"
+      }
+    },
+    "CVE-2019-3394": {
+      "status": "success",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 17472,
+        "input_tokens": 13788,
+        "output_tokens": 3684,
+        "cached_input_tokens": 4710,
+        "reasoning_tokens": 2873,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3088,
+            "input_tokens": 2508,
+            "output_tokens": 580,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 493,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 14384,
+            "input_tokens": 11280,
+            "output_tokens": 3104,
+            "cached_input_tokens": 2662,
+            "reasoning_tokens": 2380,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "20c128332e4547019cacd0d1fb7c6199"
+      }
+    },
+    "CVE-2019-0227": {
+      "status": "failed",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 2751,
+        "input_tokens": 2358,
+        "output_tokens": 393,
+        "cached_input_tokens": 2048,
+        "reasoning_tokens": 319,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2751,
+            "input_tokens": 2358,
+            "output_tokens": 393,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 319,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "3954bd037cd04d599d36fe6c1e0fe83f"
+      }
+    },
+    "CVE-2018-16621": {
+      "status": "failed",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 3096,
+        "input_tokens": 2571,
+        "output_tokens": 525,
+        "cached_input_tokens": 2432,
+        "reasoning_tokens": 468,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3096,
+            "input_tokens": 2571,
+            "output_tokens": 525,
+            "cached_input_tokens": 2432,
+            "reasoning_tokens": 468,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "b2bc6744b34f477581c249e357a25e6c"
+      }
+    }
+  }
+}

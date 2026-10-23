@@ -1,0 +1,8 @@
+﻿scope,cve_id,purpose,calls,cache_hits,reported_tokens,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,unknown_calls,pending_calls,errors,usage_incomplete
+batch,,,3,0,1305,709,596,0,395,0,0,0,False
+cve,CVE-2019-0227,,1,0,464,285,179,0,102,0,0,0,False
+purpose,CVE-2019-0227,vulnerability_classification,1,0,464,285,179,0,102,0,0,0,False
+cve,CVE-2018-16357,,1,0,352,216,136,0,79,0,0,0,False
+purpose,CVE-2018-16357,vulnerability_classification,1,0,352,216,136,0,79,0,0,0,False
+cve,CVE-2018-16621,,1,0,489,208,281,0,214,0,0,0,False
+purpose,CVE-2018-16621,vulnerability_classification,1,0,489,208,281,0,214,0,0,0,False

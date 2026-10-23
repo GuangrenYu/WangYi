@@ -1,0 +1,4 @@
+﻿scope,cve_id,purpose,calls,cache_hits,reported_tokens,input_tokens,output_tokens,cached_input_tokens,reasoning_tokens,unknown_calls,pending_calls,errors,usage_incomplete
+batch,,,0,0,0,0,0,0,0,0,0,0,False
+cve,CVE-2025-0001,,0,0,0,0,0,0,0,0,0,0,False
+cve,CVE-2025-0002,,0,0,0,0,0,0,0,0,0,0,False

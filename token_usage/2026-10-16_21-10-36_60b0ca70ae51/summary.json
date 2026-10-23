@@ -1,0 +1,145 @@
+{
+  "task_id": "60b0ca70ae51",
+  "created_at": "2026-10-16T21:10:36.806866+08:00",
+  "updated_at": "2026-10-16T21:13:39.707495+08:00",
+  "status": "completed",
+  "timezone": "Asia/Shanghai",
+  "usage": {
+    "calls": 4,
+    "cache_hits": 0,
+    "reported_tokens": 19899,
+    "input_tokens": 15440,
+    "output_tokens": 4459,
+    "cached_input_tokens": 5606,
+    "reasoning_tokens": 3469,
+    "unknown_calls": 1,
+    "pending_calls": 0,
+    "errors": 1,
+    "usage_incomplete": true,
+    "by_purpose": {
+      "vulnerability_classification": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 5794,
+        "input_tokens": 4956,
+        "output_tokens": 838,
+        "cached_input_tokens": 2944,
+        "reasoning_tokens": 692,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false
+      },
+      "poc_from_refs_yaml": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 14105,
+        "input_tokens": 10484,
+        "output_tokens": 3621,
+        "cached_input_tokens": 2662,
+        "reasoning_tokens": 2777,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true
+      }
+    }
+  },
+  "notes": [
+    "Totals use relay-reported total_tokens; token categories may overlap.",
+    "Cached input is part of input tokens. Reasoning may already be in output or total.",
+    "Unknown and pending calls may incur charges; missing usage is never treated as a known zero."
+  ],
+  "cves": {
+    "CVE-2018-15711": {
+      "status": "success",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 17103,
+        "input_tokens": 13082,
+        "output_tokens": 4021,
+        "cached_input_tokens": 3558,
+        "reasoning_tokens": 3105,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2998,
+            "input_tokens": 2598,
+            "output_tokens": 400,
+            "cached_input_tokens": 896,
+            "reasoning_tokens": 328,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 14105,
+            "input_tokens": 10484,
+            "output_tokens": 3621,
+            "cached_input_tokens": 2662,
+            "reasoning_tokens": 2777,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "3add6d0f0ea347cba0d48c4d6b792352"
+      }
+    },
+    "CVE-2019-0227": {
+      "status": "failed",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 2796,
+        "input_tokens": 2358,
+        "output_tokens": 438,
+        "cached_input_tokens": 2048,
+        "reasoning_tokens": 364,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2796,
+            "input_tokens": 2358,
+            "output_tokens": 438,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 364,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "d15a0a0b12064d06b860e989b5ad8823"
+      }
+    }
+  }
+}

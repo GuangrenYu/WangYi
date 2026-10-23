@@ -1,0 +1,678 @@
+旧基准(工作流迪普IPS结果统计.xlsx)有命中、但本次跑(new.xlsx)漏掉的 CVE 清单
+
+漏 h3c 命中: 242 个
+漏 dptech 命中: 428 个
+
+=== 漏 h3c 命中的 CVE ===
+CVE-2000-0408	Microsoft IIS 4.0/5.0畸形文件扩展拒绝服务漏洞
+CVE-1999-0885	Alibaba get32.exe任意命令执行(CVE-1999-0885)
+CVE-2000-0975	Anaconda Foundation目录apexec.pl遍历任意文件检索
+CVE-1999-0262	HylaFAX faxsurvey任意命令执行
+CVE-1999-0148	IRIX cgi-bin处理程序漏洞(CVE-1999-0148)
+CVE-1999-0509	Shell Perl翻译远程CGI访问(tcsh)(CVE-1999-0509)
+CVE-1999-0509	Shell Perl翻译远程CGI访问(ksh)(CVE-1999-0509)
+CVE-1999-0509	Shell Perl翻译远程CGI访问(bash)(CVE-1999-0509)
+CVE-1999-0509	Shell Perl翻译远程CGI访问(csh)(CVE-1999-0509)
+CVE-1999-0509	Shell Perl Interpreter 远程CGI访问(ash)(CVE-1999-0509)
+CVE-1999-0045	多厂商 nph-test-cgi 任意目录列表
+CVE-1999-0509	Shell Perl翻译远程CGI访问(rsh)
+CVE-1999-0509	Shell Perl翻译远程CGI访问(rksh)
+CVE-1999-0509	Shell Perl翻译远程CGI访问(zsh)(CVE-1999-0509）
+CVE-1999-0191	Microsoft IIS newdsn.exe 任意文件创建
+CVE-1999-0509	Shell Perl 翻译远程CGI访问
+CVE-2000-0408	Microsoft IIS 4.0 5.0 畸形文件扩展DoS 漏洞
+CVE-2000-0408	Microsoft IIS 4.0 5.0 畸形文件扩展 DoS 漏洞
+CVE-2006-1551	PAJAX 多个任意 PHP 编码执行漏洞
+CVE-2006-4602	TikiWiki 安装脚本 JHot.PHP 远程命令执行漏洞
+CVE-2013-5696	GLPI多个PHP代码执行及SQL注入漏洞
+CVE-2013-2068	Red Hat CloudForms管理引擎5.1目录遍历漏洞
+CVE-2013-0632	Adobe ColdFusion 信息泄露漏洞(CVE-2013-0632)
+CVE-2013-3631	NAS4Free认证用户远程PHP代码执行漏洞
+CVE-2013-4211	OpenX flowplayer-3.1.1.min.js后门漏洞(CVE-2013-4211)
+CVE-2013-5576	Joomla! Media Manager任意文件上传和执行漏洞
+CVE-2013-3621	Supermicro Onboard IPMI CGI漏洞扫描(CVE-2013-3621)
+CVE-2006-1551	Pajax Call_Dispatcher远程代码执行漏洞
+CVE-2020-5398	Spring Framework反射型文件下载漏洞(CVE-2020-5398)
+CVE-2020-1947	Apache ShardingSphere远程代码执行漏洞(CVE-2020-1947)
+CVE-2020-7799	Apache FusionAuth远程命令执行漏洞(CVE-2020-7799)
+CVE-2020-7799	Apache FusionAuth远程命令执行漏洞(CVE-2020-7799)
+CVE-2019-0227	Axis1.4远程命令执行(CVE-2019-0227)
+CVE-2015-8562	Joomla! Core远程代码执行漏洞(CVE-2015-8562)
+CVE-2015-8562	Joomla! Core远程代码执行漏洞(CVE-2015-8562)
+CVE-2018-1260	Spring Security Oauth2远程代码执行(CVE-2018-1260)
+CVE-2019-10300	CloudBees Jenkins GitLab Plugin跨站请求伪造漏洞（CVE-2019-10300）
+CVE-2019-7385	Raisecom GPON命令注入漏洞(CVE-2019-7385)
+CVE-2020-10204	Nexus Repository Manager 3远程命令执行漏洞（CVE-2020-10204）
+CVE-2017-6526	dnaLIMS命令注入漏洞(CVE-2017-6526)
+CVE-2017-6920	Drupal_yaml_远程代码执行漏洞(CVE-2017-6920)
+CVE-2017-7402	Pixie任意文件上传漏洞(CVE-2017-7402)
+CVE-2016-6174	IPS Community Suite PHP代码注入漏洞CVE-2016-6174
+CVE-2020-13448	QuickBox参数注入漏洞(CVE-2020-13448)
+CVE-2020-25287	PliggCMS远程代码执行漏洞(CVE-2020-25287)
+CVE-2020-14946	Global RADAR BSA Radar路径遍历漏洞(CVE-2020-14946)
+CVE-2017-1000119	October CMS安全漏洞(CVE-2017-1000119)
+CVE-2020-7361	禅道Pro远程代码执行漏洞(CVE-2020-7361)
+CVE-2020-7991	Adive Framework跨站脚本攻击XSS跨站请求伪造CSRF漏洞(CVE-2020-7991)
+CVE-2020-8947	PANDORAFMS 7.0远程代码执行漏洞(CVE-2020-8947)
+CVE-2018-8735	Nagios XI 操作系统命令注入漏洞（CVE-2018-8735）
+CVE-2019-7580	ThinkCMF5 代码注入漏洞(CVE-2019-7580)
+CVE-2020-4280	IBM QRadar SIEM反序列化漏洞(CVE-2020-4280)
+CVE-2020-35754	Quick.CMS远程代码执行漏洞(CVE-2020-35754)
+CVE-2021-3317	疑似KLog命令注入漏洞(CVE-2021-3317)
+CVE-2016-6600	ZOHO WebNMS Framework路径遍历漏洞（CVE-2016-6600）
+CVE-2018-16946	LG智能IP摄像机认证bypass(CVE-2018-16946)
+CVE-2020-11444	Sonatype Nexus Repository Manager安全漏洞（CVE-2020-11444）
+CVE-2015-8562	Joomla 3.4.5反序列化漏洞(CVE-2015-8562)
+CVE-2017-3066	Adobe ColdFusion反序列化漏洞（CVE-2017-3066）
+CVE-2020-13957	Apache Solr 配置文件类漏洞(CVE-2020-13957)
+CVE-2020-5398	Vmware Spring Framework XSS漏洞(CVE-2020-5398)
+CVE-2019-0227	Axis1.4 远程命令执行(CVE-2019-0227)
+CVE-2020-6843	ZOHO ManageEngine ServiceDesk Plus跨站脚本漏洞(CVE-2020-6843)
+CVE-2020-26919	疑似NETGEAR JGS516PE代码执行漏洞(CVE-2020-26919)
+CVE-2021-28482	Microsoft Exchange Server代码注入漏洞（CVE-2021-28482）
+CVE-2020-12078	Open-AudIT v3.3.1 远程命令执行漏洞(CVE-2020-12078)
+CVE-2021-28169	Jetty Utility Servlets ConcatServlet信息泄漏漏洞（CVE-2021-28169）
+CVE-2020-14062	FasterXML jackson-databind反序列化漏洞(CVE-2020-14062)
+CVE-2021-44832	Apache Log4j远程代码执行漏洞（CVE-2021-44832）
+CVE-2021-31758	腾达路由器 AC11 堆栈缓冲区溢出（CVE-2021-31758）
+CVE-2021-21425	GravCMS 代码执行漏洞(CVE-2021-21425)
+CVE-2017-16957	多款TP-Link产品安全漏洞（CVE-2017-16957）
+CVE-2015-8562	Joomla! Core远程代码执行漏洞（CVE-2015-8562）
+CVE-2020-25751	Joomla SQL注入漏洞(CVE-2020-25751)
+CVE-2021-21347	XStream任意代码执行漏洞(CVE-2021-21347)
+CVE-2021-21350	XStream安全漏洞(CVE-2021-21341/CVE-2021-21347/CVE-2021-21348/CVE-2021-21349/CVE-2021-21350)
+CVE-2020-16952	Microsoft SharePoint远程代码执行漏洞(CVE-2020-16952)
+CVE-2020-36186	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36186)
+CVE-2021-3297	Zyxel NBG2105身份认证绕过漏洞(CVE-2021-3297)
+CVE-2020-11113	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-11113)
+CVE-2012-0393	Apache Struts远程命令执行和任意文件覆盖漏洞(CVE-2012-0393)
+CVE-2020-36180	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36180)
+CVE-2020-27232	OpenClinic GA Web Portal manageServiceStocks.jsp page SQL 注入漏洞(CVE-2020-27232)
+CVE-2020-27236	OpenClinic GA Web Portal getAssets.jsp 页面SQL注入漏洞(CVE-2020-27236/CVE-2020-27235/CVE-2020-27234/CVE-2020-27233)
+CVE-2020-36189	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36189)
+CVE-2021-21344	XStream任意代码执行漏洞(CVE-2021-21344)
+CVE-2020-25734	WebTareas文件包含漏洞(CVE-2020-25734)
+CVE-2020-27231	OpenClinic GA Web Portal patientslist.do 页面 SQL 注入漏洞(CVE-2020-27231/CVE-2020-27230/CVE-2020-27229)
+CVE-2020-36184	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36184)
+CVE-2020-13569	OpenEMR GACL 跨站请求伪造漏洞(CVE-2020-13569)
+CVE-2020-36185	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36185)
+CVE-2021-21346	XStream任意代码执行漏洞(CVE-2021-21346)
+CVE-2020-27241	OpenClinic GA Web Portal getAssets.jsp 页面SQL注入漏洞(CVE-2020-27241/CVE-2020-27240/CVE-2020-27239/CVE-2020-27238/CVE-2020-27237)
+CVE-2020-27226	OpenClinic GA Web Portal statistics/quickFile.jsp 页面 SQL 注入漏洞(CVE-2020-27226)
+CVE-2018-16621	Nexus Repository Manager3远程命令执行漏洞(CVE-2020-10204/CVE-2018-16621)
+CVE-2021-21350	XStream远程代码执行漏洞(CVE-2021-21350)
+CVE-2019-12643	Cisco IOS XE REST API身份验证绕过(CVE-2019-12643)
+CVE-2011-1092	PHP 'shmop_read()'整数溢出漏洞（CVE-2011-1092）
+CVE-2016-6816	Apache Tomcat输入验证错误漏洞（CVE-2016-6816）
+CVE-2022-1713	JGraph draw.io信息泄露漏洞（CVE-2022-1713）
+CVE-2022-0824	Webmin远程代码执行漏洞(CVE-2022-0824)-赋权payload
+CVE-2022-0824	Webmin远程代码执行漏洞(CVE-2022-0824)-下载payload
+CVE-2020-9480	疑似Apache Spark认证绕过漏洞(CVE-2020-9480)
+CVE-2021-4039	Zyxel NWA-1100-NH命令注入漏洞(CVE-2021-4039)
+CVE-2021-21983	疑似VMware vRealize Operations任意文件写入漏洞（CVE-2021-21983）
+CVE-2020-13957	Apache Solr未授权上传漏洞（CVE-2020-13957）
+CVE-2022-27352	Simple House Rental System文件上传漏洞(CVE-2022-27352)
+CVE-2022-27357	E-Commerce Website任意文件上传漏洞(CVE-2022-27357)
+CVE-2022-28021	Purchase Order Management System文件上传漏洞(CVE-2022-28021)
+CVE-2022-27351	PHPGurukul Zoo Management System文件上传漏洞(CVE-2022-27351)
+CVE-2022-27064	Musical World文件上传漏洞(CVE-2022-27064)
+CVE-2022-23940	疑似SuiteCRM远程代码执行漏洞(CVE-2022-23940)
+CVE-2022-41544	GetSimple CMS命令执行漏洞(CVE-2022-41544)
+CVE-2022-30708	Webmin 远程命令执行漏洞(CVE-2022-30708)
+CVE-2022-27349	Social Codia SMS任意文件上传漏洞(CVE-2022-27349)
+CVE-2022-29307	Ionize CMS命令执行漏洞(CVE-2022-29307)
+CVE-2022-1429	Pimcore SQL注入漏洞(CVE-2022-1429)
+CVE-2022-22909	HotelDruid代码注入漏洞(CVE-2022-22909)
+CVE-2022-1993	Gogs路径遍历漏洞(CVE-2022-1993)
+CVE-2022-28346	Django SQL注入漏洞(CVE-2022-28346)
+CVE-2022-21145	疑似Lansweeper跨站脚本漏洞(CVE-2022-21145)
+CVE-2020-11579	Chadha Software Technologies Chadha PHPKB访问控制错误漏洞(CVE-2020-11579)
+CVE-2022-32300	YouDianCMS SQL注入漏洞(CVE-2022-32300)
+CVE-2022-32301	YouDianCMS SQL注入漏洞(CVE-2022-32301)
+CVE-2013-2572	TPLINK IP Camera 未授权访问漏洞(CVE-2013-2572)
+CVE-2013-1594	多款Vivotek IP Camera产品信息泄露漏洞(CVE-2013-1594)
+CVE-2020-27130	Cisco Security Manager任意文件下载漏洞(CVE-2020-27130)
+CVE-2022-41852	Apache Commons Jxpath代码执行漏洞(CVE-2022-41852)
+CVE-2020-27241	OpenClinic GA Web Portal getAssets.jsp 页面SQL注入漏洞(CVE-2020-27240/CVE-2020-27239/CVE-2020-27238/CVE-2020-27237/CVE-2020-27241)
+CVE-2020-27235	OpenClinic GA Web Portal getAssets.jsp 页面SQL注入漏洞(CVE-2020-27234/CVE-2020-27233/CVE-2020-27236/CVE-2020-27235)
+CVE-2020-27231	OpenClinic GA Web Portal patientslist.do 页面 SQL 注入漏洞(CVE-2020-27230/CVE-2020-27229/CVE-2020-27231)
+CVE-2012-1933	Sourcefabric Newscoop多个远程文件包含漏洞(CVE-2012-1933)
+CVE-2012-0551	Oracle GlassFish跨站脚本漏洞(CVE-2012-0551)
+CVE-2012-0551	Oracle GlassFish跨站脚本漏洞(CVE-2012-0551)
+CVE-2014-8739	WordPress Creative Contact Form 任意文件上传(CVE-2014-8739)
+CVE-2015-1172	WordPress Theme Holding Pattern - 任意文件上传(CVE-2015-1172)
+CVE-2012-5692	Invision IP.Board函数unserialize反序列化php代码执行代码漏洞(CVE-2012-5692)
+CVE-2012-0299	赛门铁克web应用任意php文件上传漏洞(CVE-2012-0299)
+CVE-2013-4490	Gitlab Ssh秘钥上传远程命令执行漏洞(CVE-2013-4490)
+CVE-2020-11619	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-11619)
+CVE-2019-20139	Nagios XI跨站脚本漏洞(CVE-2019-20139)
+CVE-2019-20139	Nagios XI跨站脚本漏洞(CVE-2019-20139)
+CVE-2018-15711	Nagios XI 安全漏洞(CVE-2018-15711)
+CVE-2020-27130	Cisco Security Manager任意文件下载漏洞(CVE-2020-27130)
+CVE-2020-27130	Cisco Security Manager任意文件下载漏洞(CVE-2020-27130)
+CVE-2020-27130	Cisco Security Manager任意文件下载漏洞(CVE-2020-27130)
+CVE-2015-2292	Wordpress SEO by Yoast插件SQL盲注漏洞(CVE-2015-2292)
+CVE-2018-8026	Apache Solr 实体注入漏洞(CVE-2018-8026)
+CVE-2017-3164	Apache Solr 代码问题漏洞(CVE-2017-3164)
+CVE-2017-3164	Apache solr 服务端请求伪造漏洞(CVE-2017-3164)
+CVE-2018-6582	Joomla! Component Zh GoogleMap 8.4.0.0 - SQL注入漏洞(CVE-2018-6582)
+CVE-2014-8877	WordPress Plugin CM Download Manager 2.0.0 - 代码注入(CVE-2014-8877)
+CVE-2012-4959	Novell File Reporter NFRAgent.exe路径遍历漏洞（CVE-2012-4959）
+CVE-2020-5398	Vmware Spring Framework XSS漏洞(CVE-2020-5398)
+CVE-2018-5767	Tenda AC15远程代码执行漏洞(CVE-2018-5767)
+CVE-2018-0258	Cisco Prime Infrastructure And DCNM XmpFileUploadServlet目录遍历漏洞(CVE-2018-0258)
+CVE-2014-4847	WordPress Random Banner 1.1.2.1 跨站脚本漏洞(CVE-2014-4847)
+CVE-2014-2540	BOrbit Open Ad Server 1.1.0 SQL注入漏洞(CVE-2014-2540)
+CVE-2013-2714	Wordpress PodPress 插件跨站脚本漏洞(CVE-2013-2714)
+CVE-2013-1636	Wordpress Pretty Link 插件跨站脚本漏洞(CVE-2013-1636)
+CVE-2022-22916	O2OA远程命令执行漏洞(CVE-2022-22916)
+CVE-2022-25084	TOTOLINK路由器任意命令执行漏洞(CVE-2022-25084)
+CVE-2023-2928	Desdev DedeCMS代码注入漏洞(CVE-2023-2928)-edit
+CVE-2021-41746	疑似用友TurboCrm SQL注入漏洞(CVE-2021-41746)
+CVE-2023-2928	Desdev DedeCMS代码注入漏洞(CVE-2023-2928)-control
+CVE-2017-17733	MacCMS 8.x代码执行攻击(CVE-2017-17733)
+CVE-2021-24285	WordPress SQL注入漏洞(CVE-2021-24285)
+CVE-2022-46552	D-Link DIR-846操作系统命令注入漏洞(CVE-2022-46552)
+CVE-2023-1578	Pimcore SQL注入漏洞(CVE-2023-1578)
+CVE-2023-39147	Uvdesk v1.1.3文件上传漏洞(CVE-2023-39147)
+CVE-2019-7194	QNAP任意文件读取漏洞(CVE-2019-7194)
+CVE-2021-24216	WordPress All-in-One WP Migration远程代码执行漏洞(CVE-2021-24216)
+CVE-2022-0320	WordPress Essential Addons目录遍历漏洞(CVE-2022-0320)
+CVE-2023-44827	禅道后台命令注入漏洞(CVE-2023-44827)
+CVE-2022-1950	WordPress plugin Youzify SQL注入漏洞(CVE-2022-1950)
+CVE-2023-1020	Wordpress插件Steveas WP Live Chat Shoutbox SQL注入漏洞(CVE-2023-1020)
+CVE-2023-6553	WordPress Backup Migration远程代码执行漏洞(CVE-2023-6553)
+CVE-2024-0490	华夏ERP信息泄露漏洞（CVE-2024-0490|CNVD-2020-63964）
+CVE-2024-25153	FileCatalyst Workflow Web Portal文件上传漏洞（CVE-2024-25153）
+CVE-2022-29383	NETGEAR ProSafe SSL VPN firmware FVS336G SQL注入漏洞(CVE-2022-29383)
+CVE-2022-0784	WordPress plugin Title Experiments Free SQL注入漏洞(CVE-2022-0784)
+CVE-2022-0952	WordPress Sitemap by click5授权问题漏洞(CVE-2022-0952)
+CVE-2020-16139	Cisco Unified IP会议站7937G拒绝服务(CVE-2020-16139)
+CVE-2020-24550	疑似EpiServer Find开放重定向(CVE-2020-24550)
+CVE-2024-23334	疑似aiohttp目录遍历漏洞(CVE-2024-23334)
+CVE-2020-35713	Belkin Linksys RE6500远程命令执行(CVE-2020-35713)
+CVE-2021-24750	WordPress Visitor Statistics(Real Time Traffic)SQL注入（CVE-2021-24750）
+CVE-2024-2879	WordPress Plugin LayerSlider SQL注入漏洞（CVE-2024-2879）
+CVE-2024-2566	福建科立讯通信指挥调度平台get_extension_yl.php SQL注入漏洞（CVE-2024-2566）
+CVE-2022-30512	School Dormitory Management System SQL注入漏洞（CVE-2022-30512）
+CVE-2022-1950	WordPress plugin Youzify SQL注入漏洞（CVE-2022-1950）
+CVE-2022-39045	Siretta QUARTZ-GOLD目录遍历漏洞（CVE-2022-39045）
+CVE-2022-26210	多款TotoLink产品操作系统命令注入漏洞（CVE-2022-26210）
+CVE-2024-41319	TOTOlink A6000R命令执行漏洞（CVE-2024-41319）
+CVE-2023-38286	Thymeleaf命令注入漏洞（CVE-2023-38286）
+CVE-2018-8823	PrestaShop Responsive Mega Menu Pro远程命令执行漏洞（CVE-2018-8823）
+CVE-2019-18818	strapi授权问题漏洞（CVE-2019-18818）
+CVE-2022-23277	疑似Microsoft Exchange Server代码注入漏洞（CVE-2022-23277）
+CVE-2024-12849	WordPress plugin The Error Log Viewer By WP Guru任意文件读取漏洞漏洞（CVE-2024-12849）
+CVE-2024-41468	Tenda FH1201 v1.2.0.14接口exeCommand存在远程命令执行漏洞(CVE-2024-41468)
+CVE-2024-5932	WordPress插件GiveWP反序列漏洞(CVE-2024-5932)
+CVE-2024-0533	Tenda A15 devName参数缓冲区溢出漏洞(CVE-2024-0533)
+CVE-2024-37084	VMware Spring Cloud Data Flow远程代码执行漏洞(CVE-2024-37084)
+CVE-2020-9480	Apache Spark远程代码执行漏洞(CVE-2020-9480)
+CVE-2022-21705	October CMS远程代码执行漏洞(CVE-2022-21705)
+CVE-2023-30013	TOTOLink setTracerouteCfg未认证命令注入漏洞(CVE-2023-30013)
+CVE-2021-31601	Hitachi Vantara Pentaho授权机制不正确漏洞(CVE-2021-31601)
+CVE-2019-18818	strapi授权问题漏洞(CVE-2019-18818)#2
+CVE-2023-24735	PMB 7.4.6开放重定向漏洞(CVE-2023-24735)
+CVE-2025-53770	Microsoft SharePoint反序列化远程代码执行漏洞(CVE-2025-53770)
+CVE-2023-0159	Extensive VC Addons for WPBakery page builder未认证的远程代码执行漏洞(CVE-2023-0159)
+CVE-2025-27505	疑似GeoServer REST API安全绕过漏洞(CVE-2025-27505)
+CVE-2024-3552	WordPress plugin Web Directory Free SQL注入漏洞(CVE-2024-3552)
+CVE-2025-48703	CentOS Web Panel远程命令执行漏洞(CVE-2025-48703)
+CVE-2025-2825	CrushFTP认证绕过漏洞(CVE-2025-2825)
+CVE-2023-32243	疑似WordPress插件Essential Addons for Elementor身份验证绕过漏洞(CVE-2023-32243)
+CVE-2023-27997	Fortinet FortiOS缓冲区错误漏洞(CVE-2023-27997)
+CVE-2025-31324	SAP NetWeaver Visual Composer任意文件上传漏洞(CVE-2025-31324)
+CVE-2022-39045	Siretta QUARTZ-GOLD路径遍历漏洞(CVE-2022-39045)
+CVE-2022-27226	iRZ Mobile Router CSRF漏洞(CVE-2022-27226)
+CVE-2019-0227	Apache Axis服务器端请求伪造漏洞(CVE-2019-0227)
+CVE-2024-8060	Open WebUI任意文件上传漏洞(CVE-2024-8060)
+CVE-2024-54152	Angular代码注入漏洞(CVE-2024-54152)
+CVE-2021-21311	疑似SOURCEFORGE Adminer服务端请求伪造漏洞(CVE-2021-21311)
+CVE-2023-46749	Apache Shiro身份验证绕过漏洞(CVE-2023-46749)
+CVE-2019-9955	ZyXEL产品跨站脚本漏洞（CVE-2019-9955）
+CVE-2024-7037	Open WebUI路径遍历漏洞(CVE-2024-7037)
+CVE-2025-34038	泛微E-Cology Getdata SQL注入漏洞(CVE-2025-34038)
+CVE-2023-4521	WordPress plugin Import XML and RSS Feeds代码注入漏洞(CVE-2023-4521)
+CVE-2023-24243	CData RSB Connect v22.0.8336服务器端请求伪造(CVE-2023-24243)
+CVE-2024-10732	通达OA index.php sql注入（CVE-2024-10732）
+CVE-2024-10131	RAGFlow命令注入漏洞(CVE-2024-10131)
+CVE-2020-8115	Revive Adserver跨站脚本漏洞(CVE-2020-8115)
+CVE-2023-31059	Repetier Server目录遍历（CVE-2023-31059）
+CVE-2024-42599	SeaCMS admin_files.php任意文件写入漏洞(CVE-2024-42599)
+CVE-2022-25064	TP-LINK TL-WR840N(ES)远程代码执行漏洞(CVE-2022-25064)
+CVE-2024-3458	网康科技NS-ASG应用安全网关SQL注入漏洞(CVE-2024-3458)
+CVE-2026-30822	疑似Flowise批量赋值漏洞(CVE-2026-30822)
+CVE-2026-1420	Tenda AC23 firmware缓冲区错误漏洞(CVE-2026-1420)
+CVE-2026-3399|CVE-2026-2911	Tenda F453 FH451缓冲区错误漏洞(CVE-2026-3399|CVE-2026-2911)
+CVE-2026-28287	FreePBX操作系统命令注入漏洞(CVE-2026-28287)
+
+=== 漏 dptech 命中的 CVE ===
+CVE-2000-0287	BizDB bizdb-search.cgi 任意命令执行
+CVE-2001-0214	way-board.cgi db 参数任意文件读取
+CVE-2002-2113	AHG搜索引擎Search.CGI任意命令执行漏洞(CVE-2002-2113)
+CVE-2002-0215	Agora.CGI Debug模式路径泄露漏洞(CVE-2002-0215)
+CVE-2001-0253	iWeb Hyperseek 2000 hsx.cgi遍历任意文件读取
+CVE-1999-0266	多厂商info2www CGI任意命令执行
+CVE-2006-0522	Sygate管理服务器认证Applet SQL注入
+CVE-1999-0753	Mini SQL w3-msql任意目录访问
+CVE-2000-0322	Red Hat Piranha虚拟服务器数据包passwd.php3任意命令执行
+CVE-2001-0305	Thinking Arts ES.One store.cgi StartID参数遍历任意文件访问
+CVE-1999-0176	WebGais webgais CGI任意命令执行
+CVE-2000-0282	Talentsoft Web+ webplus CGI任意文件读取
+CVE-2000-0921	Hassan Shopping Cart shop.cgi任意文件访问
+CVE-1999-1063	CDomain whois_raw.cgi fqdn 参数任意命令执行
+CVE-2001-0987	CGIWrap cgiwrap多个变量XSS
+CVE-1999-0467	Webcom CGI 留言薄 rguest.exe wguest.exe 漏洞
+CVE-2000-0429	Cart32 远程管理密码漏洞(CVE-2000-0429)
+CVE-2003-0488	Kerio MailServer跨站脚本漏洞 (add_acl)
+CVE-2003-1086	PMachine Lib.Inc.PHP 远程包含命令执行漏洞
+CVE-2005-4170	eFiction多个远程输入验证漏洞(CVE-2005-4170)
+CVE-2005-1376	Claroline E-Learning 应用 insertMyDoc.php 目录遍历漏洞
+CVE-2005-1375	Claroline E-Learning应用多个远程输入验证漏洞(CVE-2005-1375)
+CVE-2006-1491	Horde Help Viewer 远程 PHP 编码执行漏洞
+CVE-2005-4143	Lyris ListManager 多个 SQL 注入漏洞
+CVE-2006-1776	Simplog 远程文件包含漏洞
+CVE-2006-1551	PAJAX 多个任意 PHP 编码执行漏洞
+CVE-2004-1932	PHP-Nuke admin.php admin 变量 SQL 注入
+CVE-2006-0644	CPG Dragonfly CMS 远程命令执行漏洞
+CVE-2007-3233	TEC-IT TBarCode OCX ActiveX 远程任意文件重写漏洞
+CVE-2007-3631	GameSiteScript before 3.1 (profile id) 远程 SQL 注入漏洞
+CVE-2007-4061	Nessus 漏洞 Scanner 3.0.6 ActiveX 命令 Exec 漏洞
+CVE-2009-0796	Apache perl-status模块跨站脚本攻击
+CVE-2006-1491	WEB-PHP的帮助模块任意命令执行尝试
+CVE-2013-2068	Red Hat CloudForms管理引擎5.1目录遍历漏洞
+CVE-2013-1391	多款Hunt CCTV信息泄露漏洞(CVE-2013-1391)
+CVE-2013-3319	SAP Netweaver 信息泄露漏洞(CVE-2013-3319)
+CVE-2013-3502	GroundWork monarch_scan.cgi系统命令注入漏洞(CVE-2013-3502)
+CVE-2013-3621	Supermicro Onboard IPMI CGI漏洞扫描(CVE-2013-3621)
+CVE-2016-4438	Apache Struts2远程代码执行漏洞S2-037(CVE-2016-4438)|S2-devmode
+CVE-2000-1005	WEB-MISC Webplus访问漏洞
+CVE-2006-1551	Pajax Call_Dispatcher远程代码执行漏洞
+CVE-2000-0925	WEB-MISC SmartWin CyberOffice Shopping Cart信息泄露漏洞
+CVE-2020-1947	Apache ShardingSphere远程代码执行漏洞(CVE-2020-1947)
+CVE-2019-12384	FasterXML jackson-databind远程代码执行漏洞(CVE-2019-12384)
+CVE-2020-7799	Apache FusionAuth远程命令执行漏洞(CVE-2020-7799)
+CVE-2020-7799	Apache FusionAuth远程命令执行漏洞(CVE-2020-7799)
+CVE-2019-5533	VMware VeloCloud Orchestrator信息泄露漏洞(CVE-2019-5533)
+CVE-2017-17560	Western Digital MyCloud PR4100 Web文件上传漏洞(CVE-2017-17560)
+CVE-2017-6077	NETGEAR DGN2200远程命令执行漏洞(CVE-2017-6077)
+CVE-2019-10300	CloudBees Jenkins GitLab Plugin跨站请求伪造漏洞（CVE-2019-10300）
+CVE-2019-18935	疑似Progress Telerik UI for ASP.NET AJAX代码问题漏洞(CVE-2019-18935)
+CVE-2019-7385	Raisecom GPON命令注入漏洞(CVE-2019-7385)
+CVE-2019-13505	WordPress Appointment Hour Booking插件跨站脚本漏洞(CVE-2019-13505)
+CVE-2016-9565	Nagios任意文件读取漏洞(CVE-2016-9565)
+CVE-2017-15095|CVE-2017-7525	FasterXML_Jackson-databind反序列化远程代码执行漏洞(CVE-2017-7525)
+CVE-2017-9418	Wordpress_Testimonials插件_SQL注入漏洞(CVE-2017-9418)
+CVE-2017-5173	Geutebruck IP Camera G-Cam EFD-2250安全漏洞(CVE-2017-5173)
+CVE-2017-5173	Geutebruck IP Camera G-Cam EFD-2250安全漏洞(CVE-2017-5173)
+CVE-2017-6526	dnaLIMS命令注入漏洞(CVE-2017-6526)
+CVE-2017-6823	Fiyo_CMS安全漏洞(CVE-2017-6823)
+CVE-2020-6286	SAP NetWeaver AS目录遍历漏洞(CVE-2020-6286)
+CVE-2020-6008	WordPress LifterLMS插件代码问题漏洞(CVE-2020-6008)
+CVE-2020-13448	QuickBox参数注入漏洞(CVE-2020-13448)
+CVE-2020-13782	D-Link DIR-865L操作系统命令注入漏洞(CVE-2020-13782)
+cve-2020-10386	Chadha Software Technologies PHPKB Standard Multi-Language输入验证错误漏洞(cve-2020-10386)
+CVE-2018-8735	Nagios XI 操作系统命令注入漏洞（CVE-2018-8735）
+CVE-2019-16132	OKLite v1.2.25 任意文件删除漏洞(CVE-2019-16132)
+CVE-2019-16068	Enigma NMS 65.0.0-跨站点请求伪造漏洞(CVE-2019-16068)
+CVE-2019-19832	Xerox AltaLink 跨站请求伪造漏洞（CVE-2019-19832）
+cve-2019-19266	IceWarp WebMail Server跨站脚本漏洞（cve-2019-19266）
+CVE-2021-3317	疑似KLog命令注入漏洞(CVE-2021-3317)
+CVE-2016-6600	ZOHO WebNMS Framework路径遍历漏洞（CVE-2016-6600）
+CVE-2019-9580	StackStorm Web UI远程执行代码(CVE-2019-9580)
+CVE-2020-13925	Apache Kylin远程代码执行漏洞(CVE-2020-13925)
+CVE-2006-4000	疑似Barracuda Spam Firewall任意文件访问漏洞(CVE-2006-4000)
+CVE-2018-19487	WordPress WP-jobhunt插件信息泄露漏洞 (CVE-2018-19487)
+CVE-2018-18925	Gogs远程代码执行漏洞(CVE-2018-18925)
+CVE-2019-3394	Atlassian Confluence 本地文件类漏洞(CVE-2019-3394)
+CVE-2021-26885	Microsoft Exchange SSRF漏洞（CVE-2021-26885）
+CVE-2019-13063	Tyto Software Sahi Pro路径遍历漏洞（CVE-2019-13063）
+CVE-2020-35230	疑似NETGEAR JGS516PE输入验证错误漏洞(CVE-2020-35230)
+CVE-2020-26919	疑似NETGEAR JGS516PE代码执行漏洞(CVE-2020-26919)
+CVE-2021-28482	Microsoft Exchange Server代码注入漏洞（CVE-2021-28482）
+CVE-2021-35956	AKCP sensorProbe跨站脚本漏洞(CVE-2021-35956)
+CVE-2020-12078	Open-AudIT v3.3.1 远程命令执行漏洞(CVE-2020-12078)
+CVE-2021-28242	b2evolution 'cf_name' SQL注入漏洞（SELECT FROM）(CVE-2021-28242)
+CVE-2020-11060	GLPI 9.4.5远程代码执行(CVE-2020-11060)
+CVE-2019-12616	phpMyAdmin 本地文件包含漏洞(CVE-2019-12616)
+CVE-2021-28152	宏电H8922后台任意文件读取漏洞（CVE-2021-28152）
+CVE-2020-35228	Netgear NETGEAR JGS516PE跨站脚本漏洞（CVE-2020-35228）
+CVE-2020-10385	Wordpress 插件 WPForms 1.5.8.2 XSS 漏洞(CVE-2020-10385)
+CVE-2020-14062	FasterXML jackson-databind反序列化漏洞(CVE-2020-14062)
+CVE-2018-9175	Dedecms_V5.7后台getshell漏洞（CVE-2018-9175）
+CVE-2021-21425	GravCMS 代码执行漏洞(CVE-2021-21425)
+CVE-2018-14961	Zzcms 8.3前台sql注入漏洞(CVE-2018-14961)
+CVE-2018-16357	PbootCMS SQL注入漏洞（CVE-2018-16357）
+CVE-2018-18852	CERIO DT-300N路由器远程代码执行漏洞（CVE-2018-18852）
+CVE-2019-14540	FasterXML Jackson-databind远程执行代码漏洞(CVE-2019-14540)
+CVE-2018-12023	FasterXML Jackson-databind远程代码执行漏洞(CVE-2018-12023)
+CVE-2020-36182	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36182)
+CVE-2020-24219	Hisilicon基于目录遍历的任意文件泄露漏洞(CVE-2020-24219)
+CVE-2020-36187	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36187)
+CVE-2012-0394	Apache Struts Developer Mode OGNL代码执行漏洞(CVE-2012-0394)
+CVE-2020-10968	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-10968)
+CVE-2018-10653	Citrix XenMobile Server XML外部实体注入漏洞(CVE-2018-10653)
+CVE-2020-28074	Online Health Card System SQL注入漏洞(CVE-2020-28074)
+CVE-2019-16335	FasterXML Jackson-databind远程执行代码漏洞(CVE-2019-16335)
+CVE-2020-28184	TerraMaster TOS跨站脚本漏洞(CVE-2020-28184)
+CVE-2014-3961	WordPress Participants数据库插件注入和访问绕过漏洞(CVE-2014-3961)
+CVE-2012-0393	Apache Struts远程命令执行和任意文件覆盖漏洞(CVE-2012-0393)
+CVE-2020-10968	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-10968)
+CVE-2018-12022	FasterXML Jackson-databind远程代码执行漏洞(CVE-2018-12022)
+CVE-2020-14061	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-14061)
+CVE-2014-6446	WordPress Infusionsoft Gravity Forms插件输入验证错误漏洞漏洞(CVE-2014-6446)
+CVE-2020-11620	FasterXML Jackson-databind服务端请求伪造漏洞(CVE-2020-11620)
+CVE-2019-10352	Jenkins任意文件上传漏洞(CVE-2019-10352)
+CVE-2020-36189	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36189)
+CVE-2021-21344	XStream任意代码执行漏洞(CVE-2021-21344)
+CVE-2020-35490	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-35490)
+CVE-2019-3965	OpenEMR 跨站点脚本漏洞(CVE-2019-3963/CVE-2019-3964/CVE-2019-3965)
+CVE-2020-36185	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-36185)
+CVE-2017-6206	D-Link 1510企业级交换机认证绕过漏洞(CVE-2017-6206)
+CVE-2021-21346	XStream任意代码执行漏洞(CVE-2021-21346)
+CVE-2019-16335	FasterXML Jackson-databind远程执行代码漏洞(CVE-2019-16335)
+CVE-2020-17143	Microsoft Exchange信息泄露漏洞(CVE-2020-17143)
+CVE-2018-8898	D-Link DSL 3782 Token ID认证绕过漏洞(CVE-2018-8898)
+CVE-2019-14540	FasterXML Jackson-databind远程执行代码漏洞(CVE-2019-14540)
+CVE-2010-2375	Oracle WebLogic Server Encoded URL远程漏洞(CVE-2010-2375)
+CVE-2019-12643	Cisco IOS XE REST API身份验证绕过(CVE-2019-12643)
+CVE-2018-10230	Zend Server Zend Debugger跨站脚本漏洞(CVE-2018-10230)
+CVE-2020-14061	FasterXML Jackson-databind远程代码执行漏洞(CVE-2020-14061)
+CVE-2017-18377	Wireless IP Camera WIFICAM代码注入漏洞(CVE-2017-18377)
+CVE-2022-27643	NetGear多个产品预身份验证缓冲区溢出漏洞(CVE-2022-27643)
+CVE-2011-1938	PHP sockets.c socket_connect函数栈缓冲区溢出漏洞（CVE-2011-1938）
+CVE-2022-31680	VMware vCenter Server 反序列化漏洞（CVE-2022-31680）
+CVE-2021-31474	疑似SolarWinds NPM远程代码执行漏洞(CVE-2021-31474)-rce
+CVE-2016-4010	疑似Magento未经身份验证的任意文件写入尝试1（CVE-2016-4010）
+CVE-2021-46441|CVE-2021-46442	D-Link DIR-825 G1操作系统命令注入漏洞(CVE-2021-46441|CVE-2021-46442)
+CVE-2007-1036	疑似JBoss JMX InvokerServlet身份验证绕过漏洞（CVE-2007-1036）
+CVE-2022-22242	疑似Juniper Networks Junos OS跨站脚本漏洞(CVE-2022-22242)
+CVE-2022-22245	疑似Juniper Networks Junos OS路径遍历漏洞(CVE-2022-22245)
+CVE-2022-22246	疑似Juniper Networks Junos OS PHP本地文件包含漏洞(CVE-2022-22246)
+CVE-2022-28021	Purchase Order Management System文件上传漏洞(CVE-2022-28021)
+CVE-2022-27064	Musical World文件上传漏洞(CVE-2022-27064)
+CVE-2022-34609	H3C magic R200 栈溢出漏洞(CVE-2022-34609)
+CVE-2022-32092	D-LINK DIR-645命令注入漏洞(CVE-2022-32092)
+CVE-2022-41544	GetSimple CMS命令执行漏洞(CVE-2022-41544)
+CVE-2022-31126	Roxy-WI代码执行漏洞(CVE-2022-31126)
+CVE-2022-30708	Webmin 远程命令执行漏洞(CVE-2022-30708)
+CVE-2022-27349	Social Codia SMS任意文件上传漏洞(CVE-2022-27349)
+CVE-2022-27061	AeroCMS任意文件上传漏洞(CVE-2022-27061)
+CVE-2022-22909	HotelDruid代码注入漏洞(CVE-2022-22909)
+CVE-2022-21234	Lansweeper SQL注入漏洞(CVE-2022-21234)
+CVE-2013-4727	DDSN Interactive cm3 Acora CMS信息泄露漏洞（CVE-2013-4727）
+CVE-2013-6227	Pydio Zoho插件任意文件上传漏洞（CVE-2013-6227）
+CVE-2013-5760	QNAP Photo Station权限访问漏洞（CVE-2013-5760）
+CVE-2018-9021	CA Privileged Access Manager身份验证绕过漏洞(CVE-2018-9021)
+CVE-2020-36155	疑似WordPress权限提升漏洞(CVE-2020-36155)
+CVE-2017-6070	CMS Made Simple代码执行漏洞(CVE-2017-6070)—获取form_id
+CVE-2014-8072	疑似OpenMRS权限许可和访问控制漏洞(CVE-2014-8072)
+CVE-2020-11511	疑似WordPress LearnPress插件权限提升漏洞(CVE-2020-11511)
+CVE-2020-15943	疑似Atlassian Jira Gantt-Chart权限检查错误漏洞(CVE-2020-15943)
+CVE-2020-8429	疑似Kinetica Admin web application输入验证错误漏洞(CVE-2020-8429)
+CVE-2020-29156	疑似WordPress plugin WooCommerce权限许可和访问控制问题漏洞(CVE-2020-29156)
+CVE-2020-13852	疑似Artica Pandora FMS文件上传漏洞(CVE-2020-13852)
+CVE-2021-20023	Sonicwall On-premise Email路径遍历漏洞(CVE-2021-20023)
+CVE-2014-2268	Vtiger CRM Install模块远程代码执行漏洞（CVE-2014-2268）
+CVE-2018-3760	Sprockets信息泄露漏洞(CVE-2018-3760)
+CVE-2021-35478	Nagios Log Server跨站脚本漏洞(CVE-2021-35478)
+CVE-2013-2581	TP-Link TL-SC3171 IP远程旁路安全摄像机(CVE-2013-4775/CVE-2013-2581)
+CVE-2012-1258	Scrutinizer漏洞(CVE-2012-1258)
+CVE-2011-1398	PHP Header HTTP头注入漏洞(CVE-2011-1398)
+CVE-2015-6835	PHP Session Deserializer释放后使用漏洞(CVE-2015-6835)
+CVE-2014-8687	Seagate Business NAS远程命令执行漏洞(CVE-2014-8687)
+CVE-2013-2580	TP-Link IP摄像头远程文件上传漏洞(CVE-2013-2580)
+CVE-2014-8071	OpenMRS XSS 漏洞(CVE-2014-8071)
+CVE-2015-4592	EClinicalWorks (CCMR) SQL注入漏洞（CVE-2015-4592）(CVE-2015-4592)
+CVE-2014-1671	Dell Kace 1000 Systems Management Appliance多个SQL注入漏洞(CVE-2014-1671)
+CVE-2012-1933	Sourcefabric Newscoop多个远程文件包含漏洞(CVE-2012-1933)
+CVE-2013-2267	FUDforum远程PHP代码注入漏洞(CVE-2013-2267)
+CVE-2014-2575	DevExpress ASP.NET File Manager目录遍历漏洞(CVE-2014-2575)
+CVE-2014-5468	Railo远程文件包含漏洞(CVE-2014-5468)
+CVE-2014-9571	MantisBT 1.2.17跨站脚本漏洞(CVE-2014-9571)
+CVE-2016-1605	Micro Focus NetIQ Sentinel Server ReportViewServlet目录遍历漏洞(CVE-2016-1605)
+CVE-2022-0633	WordPress UpdraftPlus插件任意文件下载漏洞(CVE-2022-0633)
+CVE-2019-15092	WordPress Plugin Import Export WordPress Users CSV注入(CVE-2019-15092)
+CVE-2015-4684	Polycom RealPresence资源管理器任意文件上传漏洞(CVE-2015-4684)
+CVE-2022-41080	Microsoft Exchange Server 权限提升漏洞(CVE-2022-41080)
+CVE-2022-41080	Microsoft Exchange Server 权限提升漏洞(CVE-2022-41080)
+CVE-2015-2049	D-Link DCS 931L任意文件上传漏洞(CVE-2015-2049)
+CVE-2011-3587	Zope Cmd参数远程代码执行漏洞(CVE-2011-3587)
+CVE-2013-2631	TinyWebGallery路径泄露漏洞(CVE-2013-2631)
+CVE-2016-2511	WebSVN 2.3.3跨站脚本攻击漏洞(CVE-2016-2511)
+CVE-2016-5005	Apache Archiva 1.3.9版本跨站脚本漏洞(CVE-2016-5005)
+CVE-2016-5983	IBM Websphere Application Server反序列化漏洞(CVE-2016-5983)
+CVE-2016-6602	ZOHO WebNMS Framework 任意文件上传漏洞(CVE-2016-6602)
+CVE-2016-1209	WordPress Plugin Ninja Forms 任意文件上传漏洞(CVE-2016-1209)
+CVE-2012-2626	Scrutinizer HTTP认证绕过漏洞(CVE-2012-2626)
+CVE-2012-0299	赛门铁克web应用任意php文件上传漏洞(CVE-2012-0299)
+CVE-2013-4883	McAfee ePolicy Orchestrator跨站脚本漏洞(CVE-2013-4883)
+CVE-2013-4883	McAfee ePolicy Orchestrator跨站脚本漏洞(CVE-2013-4883)
+CVE-2013-4883	McAfee ePolicy Orchestrator跨站脚本漏洞(CVE-2013-4883)
+CVE-2013-4883	McAfee ePolicy Orchestrator跨站脚本漏洞(CVE-2013-4883)
+CVE-2016-6837	MantisBT 跨站脚本漏洞(CVE-2016-6837)
+CVE-2013-1080	Novell Zenworks配置管理文件上传漏洞(CVE-2013-1080)
+CVE-2018-8033	Apache OFBiz XML外部实体注入漏洞(CVE-2018-8033)
+CVE-2013-6348	Apache Struts跨站脚本漏洞(CVE-2013-6348)
+CVE-2013-6348	Apache Struts跨站脚本漏洞(CVE-2013-6348)
+CVE-2018-6585	Joomla! Component JTicketing 2.0.16 - SQL注入漏洞(CVE-2018-6585)
+CVE-2017-14596	Joomla! LDAP Blind 注入漏洞(CVE-2017-14596)
+CVE-2020-5780	WordPress插件Email Subscribers & Newsletters 身份绕过漏洞(CVE-2020-5780)
+CVE-2021-31181	Microsoft SharePoint代码注入漏洞(CVE-2021-31181)
+CVE-2021-3164	Churchdesk Church Rota 代码问题漏洞（CVE-2021-3164）
+CVE-2021-31682	WebCTRL跨站脚本注入漏洞(CVE-2021-31682)
+CVE-2022-44645	Apache Linkis反序列化漏洞(CVE-2022-44645)
+CVE-2021-24245	WordPress插件Stop Spammers反射型跨站脚本漏洞(CVE-2021-24245)
+CVE-2023-27025	RuoYi任意文件下载漏洞(CVE-2023-27025)
+CVE-2018-16356	PbootCMS sql注入漏洞(CVE-2018-16356)
+CVE-2019-3995	疑似ELOG Show_uploader_json空指针取消引用漏洞(CVE-2019-3995)
+CVE-2019-17119	WiKID Systems 2FA Enterprise Server SQL注入漏洞(CVE-2019-17119)
+CVE-2018-15707	Advantech WebAccess跨站脚本漏洞(CVE-2018-15707)
+CVE-2017-7719	WordPress Plugin Spider Event Calendar 1.5.51 SQL盲注漏洞(CVE-2017-7719)
+CVE-2015-8351	WordPress Gwolle Guestbook 1.5.3 远程文件包含漏洞(CVE-2015-8351)
+CVE-2015-8350	WordPress Calls To Action 2.4.3 跨站脚本漏洞(CVE-2015-8350)
+CVE-2015-8350	WordPress Calls To Action 2.4.3 跨站脚本漏洞(CVE-2015-8350)
+CVE-2015-7682	WordPress Pie Register 2.0.18 SQL注入漏洞(CVE-2015-7682)
+CVE-2015-7682	WordPress Pie Register 2.0.18 SQL注入漏洞(CVE-2015-7682)
+CVE-2015-4064	WordPress Landing Pages 1.8.4 SQL注入漏洞(CVE-2015-4064)
+CVE-2015-4010	WordPress Encrypted Contact Form 1.0.4 插件跨站脚本漏洞(CVE-2015-4010)
+CVE-2015-3648	ResourceSpace 7.1.6513 本地文件包含漏洞(CVE-2015-3648)
+CVE-2015-3301	WordPress TheCartPress 1.3.9 本地文件包含漏洞(CVE-2015-3301)
+CVE-2015-2755	WordPress AB Google Map Travel 跨站脚本漏洞(CVE-2015-2755)
+CVE-2015-2068	Magento Server MAGMI 跨站脚本漏洞(CVE-2015-2068)
+CVE-2015-1562	CMS Saurus 4.7 跨站脚本漏洞(CVE-2015-1562)
+CVE-2015-1562	CMS Saurus 4.7 跨站脚本漏洞(CVE-2015-1562)
+CVE-2015-1562	CMS Saurus 4.7 跨站脚本漏洞(CVE-2015-1562)
+CVE-2015-1477	JClassifiedsManager SQL 注入漏洞(CVE-2015-1477)
+CVE-2014-9433	CMS Contenido 4.9.5 跨站脚本漏洞(CVE-2014-9433)
+CVE-2014-9433	CMS Contenido 4.9.5 跨站脚本漏洞(CVE-2014-9433)
+CVE-2014-9311	WordPress Shareaholic 7.6.0.3 跨站脚本漏洞(CVE-2014-9311)
+CVE-2014-7959	WordPress Bulletproof-Security SQL注入漏洞(CVE-2014-7959)
+CVE-2014-5189	WordPress Lead Octopus Power SQL注入漏洞(CVE-2014-5189)
+CVE-2014-5111	Trixbox 本地文件包含漏洞(CVE-2014-5111)
+CVE-2014-5111	Trixbox 本地文件包含漏洞(CVE-2014-5111)
+CVE-2014-5109	Trixbox SQL注入漏洞(CVE-2014-5109)
+CVE-2014-4717	WordPress Simple Share Buttons Adder 4.4 跨站脚本漏洞(CVE-2014-4717)
+CVE-2014-4194	ZeroCMS 1.0 SQL注入漏洞(CVE-2014-4194)
+CVE-2014-4194	ZeroCMS 1.0 SQL注入漏洞(CVE-2014-4194)
+CVE-2014-3935	XOOPS Glossaire 1.0 SQL注入漏洞(CVE-2014-3935)
+CVE-2014-3934	PHP-Nuke 8.3版本Submit_News组件SQL注入攻击(CVE-2014-3934)
+CVE-2014-3870	WordPress bib2html 0.9.3跨站脚本漏洞(CVE-2014-3870)
+CVE-2014-3415	Sharetronix 3.3 SQL注入攻击(CVE-2014-3415)
+CVE-2014-2995	Twitget 3.3.1跨站脚本漏洞(CVE-2014-2995)
+CVE-2014-2339	GNUboard SQL注入漏洞(CVE-2014-2339)
+CVE-2014-2302	webEdition CMS 2.8.0.0远程命令执行漏洞(CVE-2014-2302)
+CVE-2014-1945	OpenDocMan SQL注入漏洞(CVE-2014-1945)
+CVE-2014-1888	WordPress Buddypress 1.9.1跨站脚本漏洞(CVE-2014-1888)
+CVE-2014-1619	Cubic CMS SQL注入漏洞(CVE-2014-1619)
+CVE-2014-1619	Cubic CMS SQL注入漏洞(CVE-2014-1619)
+CVE-2014-100016	WordPress Photocrati跨站脚本漏洞(CVE-2014-100016)
+CVE-2013-7139	Horizon QCMS 4.0 SQL注入漏洞(CVE-2013-7139)
+CVE-2013-6993	WordPress Ad-minister插件跨站脚本漏洞(CVE-2013-6993)
+CVE-2013-6991	WordPress WP-Cron插件跨站脚本漏洞(CVE-2013-6991)
+CVE-2013-6872	Collabtive 1.1 SQL注入漏洞(CVE-2013-6872)
+CVE-2013-5956	Joomla Youtube Gallery 3.4.0 跨站脚本漏洞(CVE-2013-5956)
+CVE-2013-3728	Kasseler 跨站脚本漏洞(CVE-2013-3728)
+CVE-2013-3727	Kasseler SQL注入漏洞(CVE-2013-3727)
+CVE-2013-3720	Wordpress Feedweb 插件跨站脚本漏洞(CVE-2013-3720)
+CVE-2013-3532	Wordpress Fb Survey Pro 插件SQL注入漏洞(CVE-2013-3532)
+CVE-2013-3530	Wordpress Spiffy XSPF Player 插件SQL注入漏洞(CVE-2013-3530)
+CVE-2013-1937	PhpMyAdmin tbl_gis_visualization.php XSS 漏洞(CVE-2013-1937)
+CVE-2013-1636	Wordpress Pretty Link 插件跨站脚本漏洞(CVE-2013-1636)
+CVE-2013-1463	Wordpress WP-Table Reloaded 插件跨站脚本漏洞(CVE-2013-1463)
+CVE-2013-1408	Wordpress Wysija Newsletters 插件SQL注入漏洞(CVE-2013-1408)
+CVE-2012-6653	Wordpress Video Gallery插件SQL注入漏洞(CVE-2012-6653)
+CVE-2023-26615	D-Link DIR-823G授权问题漏洞(CVE-2023-26615)
+CVE-2017-18011	Genie Affiliate Ads for Clickbank Products插件跨站脚本漏洞(CVE-2017-18011)
+CVE-2019-15092	WordPress插件注入漏洞(CVE-2019-15092)
+CVE-2021-41947	Subrion CMS SQL注入漏洞(CVE-2021-41947)
+CVE-2024-1253|CVE-2023-4121	北京百卓智能S40|S85F管理平台文件上传漏洞（CVE-2024-1253|CVE-2023-4121）
+CVE-2023-4172	疑似万江科技山洪灾害预警系统任意文件读取漏洞(CVE-2023-4172)
+CVE-2023-39143	Papercut PaperCut MF和PaperCut NG路径遍历漏洞(CVE-2023-39143)
+CVE-2022-32994	疑似HaloCMS文件上传漏洞(CVE-2022-32994)
+CVE-2021-3239	E-Learning System v1.0 SQL注入漏洞（CVE-2021-3239）
+CVE-2022-33107	ThinkPHP反序列化远程代码执行漏洞（CVE-2022-33107）
+CVE-2018-10735	Nagios XI SQL注入漏洞(CVE-2018-10735)
+CVE-2018-10738	Nagios XI SQL注入漏洞(CVE-2018-10738)
+CVE-2018-10736	Nagios XI SQL注入漏洞(CVE-2018-10736)
+CVE-2019-12828	疑似Electronic Arts Origin代码执行漏洞(CVE-2019-12828)
+CVE-2023-39147	Uvdesk v1.1.3文件上传漏洞(CVE-2023-39147)
+CVE-2019-16906	Infosysta Jira认证绕过漏洞(CVE-2019-16906)
+CVE-2019-7194	QNAP任意文件读取漏洞(CVE-2019-7194)
+CVE-2021-24216	WordPress All-in-One WP Migration远程代码执行漏洞(CVE-2021-24216)
+CVE-2020-24577	疑似D-Link DSL-28881A信息泄露漏洞(CVE-2020-24577)
+CVE-2022-46463	Harbor访问控制错误漏洞(CVE-2022-46463)
+CVE-2020-27533	Desdev DedeCMS跨站脚本漏洞(CVE-2020-27533)
+CVE-2024-0490	华夏ERP信息泄露漏洞（CVE-2024-0490|CNVD-2020-63964）
+CVE-2022-1013	WordPress插件Personal Dictionary SQL注入漏洞（CVE-2022-1013）
+CVE-2023-33730	Microworld Technologies eScan Management Console信息泄露漏洞（CVE-2023-33730）
+CVE-2022-29272	疑似Nagios XI重定向漏洞(CVE-2022-29272)
+CVE-2022-0760	WordPress plugin Simple Link Directory SQL注入漏洞(CVE-2022-0760)
+CVE-2022-0769	WordPress plugin Users Ultra SQL注入漏洞(CVE-2022-0769)
+CVE-2022-0773	WordPress plugin Documentor SQL注入漏洞(CVE-2022-0773)
+CVE-2022-0787	WordPress plugin Limit Login Attempts SQL注入漏洞(CVE-2022-0787)
+CVE-2022-0814	WordPress plugin Ubigeo de Peru SQL注入漏洞(CVE-2022-0814)
+CVE-2022-0826	WordPress plugin WP Video Gallery SQL注入漏洞(CVE-2022-0826)
+CVE-2022-0827	WordPress plugin Bestbooks SQL注入漏洞(CVE-2022-0827)
+CVE-2022-45917	ILIAS输入验证错误漏洞(CVE-2022-45917)
+CVE-2022-47615	WordPress plugin LMS LearnPress代码问题漏洞(CVE-2022-47615)
+CVE-2023-2780	Mlflow<2.3.1本地文件包含（CVE-2023-2780）
+CVE-2021-24284	WordPress Kaswara Modern VC Addons意文件上传(CVE-2021-24284)
+CVE-2024-1918	北京百卓Smart S42管理平台userattestation.php任意文件上传漏洞（CVE-2024-1918）
+CVE-2024-2622	福建科立讯通信指挥调度平台editemedia.php SQL注入漏洞（CVE-2024-2622）
+CVE-2024-2566	福建科立讯通信指挥调度平台get_extension_yl.php SQL注入漏洞（CVE-2024-2566）
+CVE-2024-2074	SpringBoot迷你天猫商城Mini-Tmall SQL注入漏洞（CVE-2024-2074）
+CVE-2020-27481	Good Layers LMS插件SQL注入漏洞（CVE-2020-27481）
+CVE-2020-11798	Mitel Networks MiCollab AWV路径遍历漏洞（CVE-2020-11798）
+CVE-2020-28976	WordPress Canto服务器端请求伪造漏洞（CVE-2020-28976）
+CVE-2023-42820	疑似JumpServer密码重置漏洞（CVE-2023-42820）
+CVE-2021-43711	TotoLink Ex200命令注入漏洞（CVE-2021-43711）
+CVE-2024-41319	TOTOlink A6000R命令执行漏洞（CVE-2024-41319）
+CVE-2022-40871	Dolibarr ERP/CRM代码注入漏洞（CVE-2022-40871）
+CVE-2022-45205	疑似JeecgBoot Jeecg-Boot SQL注入漏洞（CVE-2022-45205）
+CVE-2014-4511	GitList远程代码执行漏洞（CVE-2014-4511）
+CVE-2024-40348	Bazaar v1.4.3 swaggerui接口任意文件读取漏洞（CVE-2024-40348）
+CVE-2024-6940	DedeCMS(织梦)article_template_rand.php远程代码执行漏洞(CVE-2024-6940)
+CVE-2024-23052	悟空CRM fastjson远程代码执行漏洞（CVE-2024-23052）
+CVE-2024-10124	WordPress plugin Vayu Blocks访问控制错误漏洞（CVE-2024-10124）
+CVE-2024-12849	WordPress plugin The Error Log Viewer By WP Guru任意文件读取漏洞漏洞（CVE-2024-12849）
+CVE-2024-31848|CVE-2024-31850|CVE-2024-31849|CVE-2024-31851	CData API Server路径遍历漏洞（CVE-2024-31848|CVE-2024-31850|CVE-2024-31849|CVE-2024-31851）
+CVE-2024-44902|CVE-2024-48112	Thinkphp v6.1.3至v8.0.4反序列化漏洞(CVE-2024-44902|CVE-2024-48112)
+CVE-2024-2353	TOTOLINK X6000R操作系统命令注入漏洞(CVE-2024-2353)
+CVE-2024-24331	TOTOLINK A3300R setWiFiScheduleCfg方法命令注入漏洞(CVE-2024-24331)
+CVE-2024-24325	TOTOLINK A3300R setParentalRules方法命令注入漏洞(CVE-2024-24325)
+CVE-2025-1661	WordPress WooCommerce插件本地文件包含漏洞(CVE-2025-1661)
+CVE-2022-0482	疑似Easy!Appointments访问控制漏洞(CVE-2022-0482)
+CVE-2024-0532	Tenda A15 wpapsk_crypto2_4g参数缓冲区溢出漏洞(CVE-2024-0532)
+CVE-2022-0949	WordPress Stop Bad Bots插件SQL注入漏洞(CVE-2022-0949)
+CVE-2024-7327	疑似信呼RockOA openmodhetong前台SQL注入漏洞(CVE-2024-7327)
+CVE-2020-9480	Apache Spark远程代码执行漏洞(CVE-2020-9480)
+CVE-2023-30013	TOTOLink setTracerouteCfg未认证命令注入漏洞(CVE-2023-30013)
+CVE-2024-41107	疑似Apache CloudStack身份验证绕过漏洞(CVE-2024-41107)
+CVE-2022-1020	WordPress plugin WooCommerce任意函数调用漏洞(CVE-2022-1020)
+CVE-2022-0658	WordPress plugin CommonsBooking SQL注入漏洞(CVE-2022-0658)
+CVE-2019-13358	OpenCats代码问题XXE漏洞(CVE-2019-13358)
+CVE-2023-50719	XWiki敏感信息泄露漏洞(CVE-2023-50719)
+CVE-2023-6389	WordPress Toolbar开放重定向漏洞(CVE-2023-6389)
+CVE-2025-6939	TOTOLINK A3002RU安全漏洞(CVE-2025-6939)
+CVE-2025-6940	TOTOLINK A702R缓冲区溢出漏洞(CVE-2025-6940)
+CVE-2025-6925	RuoYi sendMessageWithAttachment任意文件读取漏洞(CVE-2025-6925)
+CVE-2025-53770	Microsoft SharePoint反序列化远程代码执行漏洞(CVE-2025-53770)
+CVE-2023-6977	Mlflow本地文件包含漏洞(CVE-2023-6977)
+CVE-2024-21793	F5 BIG-IP SQL注入漏洞(CVE-2024-21793)
+CVE-2024-24332	TOTOLINK A3300R命令注入漏洞(CVE-2024-24332)
+CVE-2024-27765	JeeWMS cgformTemplateController.do任意文件读取漏洞(CVE-2024-27765)
+CVE-2024-29202	JumpServer代码注入漏洞(CVE-2024-29202)
+CVE-2024-3218	世邦通信SPON IP网络对讲广播系统文件上传漏洞(CVE-2024-3218)
+CVE-2024-57760	JeeWMS cgReportController.do SQL注入漏洞(CVE-2024-57760)
+CVE-2025-1535	百易云资产管理运营系统admin.ticket.close.php SQL注入漏洞(CVE-2025-1535)
+CVE-2025-49002	疑似Dataease H2数据库远程代码执行漏洞(CVE-2025-49002)
+CVE-2025-2825	CrushFTP认证绕过漏洞(CVE-2025-2825)
+CVE-2023-32243	疑似WordPress插件Essential Addons for Elementor身份验证绕过漏洞(CVE-2023-32243)
+CVE-2024-47073	Dataease数据伪造问题漏洞(CVE-2024-47073)
+CVE-2023-6015	Mlflow任意文件写入漏洞(CVE-2023-6015)
+CVE-2023-51812	Tenda AX3远程代码执行漏洞(CVE-2023-51812)
+CVE-2023-27997	Fortinet FortiOS缓冲区错误漏洞(CVE-2023-27997)
+CVE-2025-31324	SAP NetWeaver Visual Composer任意文件上传漏洞(CVE-2025-31324)
+CVE-2022-24760	Parse Server代码注入漏洞（CVE-2022-24760）
+CVE-2023-0814	疑似WordPress Plugin Profile Builder - User Profile & User Registration Forms信息泄露漏洞(CVE-2023-0814)
+CVE-2023-36846	Juniper Networks Junos OS SRX访问控制错误漏洞(CVE-2023-36846)_上传
+CVE-2022-3141	WordPress plugin Translatepress Multilinugal SQL注入漏洞(CVE-2022-3141)
+CVE-2024-42676	汇智ERP Upload.aspx任意文件上传漏洞(CVE-2024-42676)
+CVE-2025-25513	Seacms V13.3 admin_members.php SQL注入漏洞(CVE-2025-25513)
+CVE-2024-10400	WordPress插件Tutor_LMS SQL注入漏洞(CVE-2024-10400)
+CVE-2025-1335	九州易通科技CmsEasy file_admin.php deleteimg_action路径遍历漏洞(CVE-2025-1335)
+CVE-2025-1336	九州易通科技CmsEasy image_admin.php deleteimg_action路径遍历漏洞(CVE-2025-1336)
+CVE-2025-1106	九州易通科技CmsEasy index.php路径遍历漏洞(CVE-2025-1106)
+CVE-2024-51751	Gradio路径遍历漏洞(CVE-2024-51751)
+CVE-2025-1844	亿赛通电子文档安全管理系统 backupLogDetail.jsp SQL注入漏洞 (CVE-2025-1844)
+CVE-2021-43495	Alquist路径遍历漏洞(CVE-2021-43495)
+CVE-2025-0788	亿赛通电子文档安全管理系统 V5 content_top.jsp存在SQL注入漏洞(CVE-2025-0788)
+CVE-2025-0789	亿赛通电子文档安全管理系统 V5 doneDetail.jsp存在SQL注入漏洞(CVE-2025-0789)
+CVE-2025-0793	亿赛通电子文档安全管理系统 V5 todoDetail.jsp存在SQL注入漏洞(CVE-2025-0793)
+CVE-2025-0791	亿赛通电子文档安全管理系统 V5 sdDoneDetail.jsp存在SQL注入漏洞(CVE-2025-0791)
+CVE-2025-0792	亿赛通电子文档安全管理系统 V5 sdTodoDetail.jsp存在SQL注入漏洞(CVE-2025-0792)
+CVE-2025-0786	亿赛通电子文档安全管理系统 V5 appDetail.jsp存在SQL注入漏洞(CVE-2025-0786)
+CVE-2025-2116	方正畅享全媒体新闻采编系统SSRF漏洞(CVE-2025-2116)
+CVE-2025-1890	shishuocms photo.htm任意文件上传漏洞(CVE-2025-1890)
+CVE-2025-22212	Joomla ConvertForms组件 index.php SQL 注入漏洞 (CVE-2025-22212)
+CVE-2024-3685	DedeCMS stepselect_main.php SQL注入漏洞(CVE-2024-3685)
+CVE-2024-12351	JFinalCMS SQL注入漏洞(CVE-2024-12351)
+CVE-2023-4521	WordPress plugin Import XML and RSS Feeds代码注入漏洞(CVE-2023-4521)
+CVE-2024-51978	Brother Industries Multiple driver installers for Windows默认管理员密码生成(CVE-2024-51978)
+CVE-2021-41408	VoIPmonitor SQL注入漏洞(CVE-2021-41408)
+CVE-2020-13483	Bitrix24 Web Application Firewall跨站脚本漏洞(CVE-2020-13483)
+CVE-2024-10732	通达OA index.php sql注入（CVE-2024-10732）
+CVE-2021-24239	WordPress plugin Payments跨站脚本漏洞(CVE-2021-24239)
+CVE-2025-25515	Seacms admin_collect.php SQL注入漏洞(CVE-2025-25515)
+CVE-2025-25517	Seacms admin_reslib.php SQL注入漏洞(CVE-2025-25517)
+CVE-2022-25064	TP-LINK TL-WR840N(ES)远程代码执行漏洞(CVE-2022-25064)
+CVE-2022-1952	WordPress eaSYNC Booking任意文件上传漏洞(CVE-2022-1952)
+CVE-2023-4596	WordPress Plugin Forminator任意文件上传漏洞(CVE-2023-4596)
+CVE-2024-45436	Ollama目录穿越漏洞(CVE-2024-45436)
+CVE-2025-1958	oasys SQL注入漏洞(CVE-2025-1958)
+CVE-2025-2112	妖气山视频管理系统SQL注入漏洞(CVE-2025-2112)
+CVE-2021-24499	WordPress theme Workreap远程代码执行漏洞(CVE-2021-24499)
+CVE-2024-3458	网康科技NS-ASG应用安全网关SQL注入漏洞(CVE-2024-3458)
+CVE-2025-2264	Sante PACS路径遍历信息泄露漏洞(CVE-2025-2264)
+CVE-2025-22954	Koha图书馆自动化管理系统SQL注入漏洞(CVE-2025-22954)
+CVE-2025-25064	Zimbra SQL注入漏洞(CVE-2025-25064)
+CVE-2025-9760	I-Educar matricula API功能级授权绕过漏洞(CVE-2025-9760)
+CVE-2025-8527	Xboot小程序管理平台SSRF漏洞(CVE-2025-8527)
+CVE-2025-2701	安美数字酒店宽带操作系统命令执行漏洞(CVE-2025-2701)
+CVE-2025-3968	新闻发布站点SQL注入漏洞(CVE-2025-3968)
+CVE-2025-7415	Tenda路由器远程命令执行漏洞(CVE-2025-7415)
+CVE-2025-9606	I-Educar SQL注入漏洞(CVE-2025-9606)
+CVE-2025-6205	DELMIA Apriso访问控制漏洞(CVE-2025-6205)
+CVE-2026-5981	D-Link DIR-605L curTime缓冲区溢出漏洞(CVE-2026-5981)
+CVE-2026-0599	Text Generation Inference资源管理错误漏洞(CVE-2026-0599)
+CVE-2026-5982	D-Link DIR-605L formAdvNetwork缓冲区溢出漏洞(CVE-2026-5982)
+CVE-2026-4903	Tenda AC5 firmware缓冲区错误漏洞(CVE-2026-4903)
+CVE-2026-3975	Tenda W3缓冲区错误漏洞(CVE-2026-3975)
+CVE-2026-33340	LoLLMs WEBUI服务端请求伪造漏洞(CVE-2026-33340)
+CVE-2026-32255	kan代码问题漏洞(CVE-2026-32255)
+CVE-2026-4043|CVE-2026-4007	Tenda i12,W3缓冲区错误漏洞(CVE-2026-4043|CVE-2026-4007)
+CVE-2026-27826	MCP Atlassian代码问题漏洞(CVE-2026-27826)
+CVE-2026-2138	Tenda TX9缓冲区错误漏洞(CVE-2026-2138)
+CVE-2026-0640	Tenda AC23 firmware缓冲区错误漏洞(CVE-2026-0640)

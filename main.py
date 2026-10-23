@@ -133,8 +133,11 @@ def run_cve(
     output_dir: str = "",
     target_ip: str = "",
     local_only: bool = False,
+    fast_mode: bool = False,
     allow_reference_links: bool = False,
     environment_discovery: bool = False,
+    usage_task_id: str = "",
+    usage_directory: str = "",
 ) -> CVEState:
     """执行一次 CVE 复现流程。"""
     from cve_hunter.agents import reclaim_owned_compose_projects
@@ -164,12 +167,18 @@ def run_cve(
         output_dir=str(output_dir or ""),
         target_ip=str(target_ip or ""),
         local_only=bool(local_only),
+        fast_mode=bool(fast_mode),
         allow_reference_links=bool(allow_reference_links),
         environment_discovery=bool(environment_discovery),
     )
 
     final_state = None
-    with run_options(target_ip=target_ip, local_only=local_only):
+    from cve_hunter.llm import llm_run_scope
+    with run_options(target_ip=target_ip, local_only=local_only), llm_run_scope(
+        Path(usage_directory) / cve_id if usage_directory else Path(output_dir or cfg.output_dir) / cve_id,
+        task_id=usage_task_id, cve_id=cve_id,
+        on_usage=(lambda usage: on_progress({"event": "llm_usage", "cve_id": cve_id, "llm_usage": usage})) if on_progress else None,
+    ):
         try:
             if on_progress:
                 on_progress({"event": "started", "cve_id": cve_id, "phase": "validate_input", "message": "任务已开始"})
@@ -194,6 +203,8 @@ def run_cve(
                             "phases_tried": list(node_update.get("phases_tried") or []),
                         })
             final_state = streamed_state
+            from cve_hunter.llm import llm_usage_summary
+            final_state["llm_usage"] = llm_usage_summary()
         finally:
             # Safety net for residual containers when report teardown was skipped
             # or intermediate cleanup failed after compose up.

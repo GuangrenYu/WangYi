@@ -1,0 +1,203 @@
+INFO:     Started server process [399722]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     127.0.0.1:47736 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:47748 - "POST /api/tasks HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-0227
+NVD 本地命中: CVE-2018-16621
+NVD 本地命中: CVE-2018-16357
+INFO:     127.0.0.1:50658 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38638 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:53368 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43370 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:59880 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46624 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46176 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50532 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45666 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:45146 - "GET /api/tasks/a637d6a9fd51 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42512 - "POST /api/tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42522 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-0227
+NVD 本地命中: CVE-2018-16357
+NVD 本地命中: CVE-2018-16621
+INFO:     127.0.0.1:40950 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:35800 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49000 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49012 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36860 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42336 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49544 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49230 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44600 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60914 - "GET /api/tasks/438fe71e10ac HTTP/1.1" 200 OK
+INFO:     127.0.0.1:39990 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:46806 - "POST /api/tasks HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-0227
+NVD 本地命中: CVE-2018-16357
+NVD 本地命中: CVE-2018-16621
+INFO:     127.0.0.1:52744 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:52758 - "GET /api/tasks/447308f236f7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52760 - "GET /api/tasks/447308f236f7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:46180 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:48542 - "GET /api/tasks/447308f236f7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44264 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:39152 - "GET /api/tasks/447308f236f7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:60892 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:47692 - "GET /api/tasks/447308f236f7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42234 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:36214 - "GET /api/tasks/447308f236f7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43256 - "GET /api/tasks/447308f236f7 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:43272 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:40264 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:48578 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48594 - "POST /api/tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48598 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2013-2068
+NVD 本地命中: CVE-2003-1086
+NVD 本地命中: CVE-2012-0551
+NVD 本地命中: CVE-2014-8072
+NVD 本地命中: CVE-2013-2572
+NVD 本地命中: CVE-2001-0987
+NVD 本地命中: CVE-2007-3233
+NVD 本地命中: CVE-2007-4061
+INFO:     127.0.0.1:48610 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2014-8739
+NVD 本地命中: CVE-2015-2755
+NVD 本地命中: CVE-2015-6835
+INFO:     127.0.0.1:36766 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36782 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2017-3066
+NVD 本地命中: CVE-2017-5173
+INFO:     127.0.0.1:34938 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2018-10653
+NVD 本地命中: CVE-2018-15711
+NVD 本地命中: CVE-2018-16357
+INFO:     127.0.0.1:42828 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:42844 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:56184 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2018-16621
+NVD 本地命中: CVE-2018-16946
+NVD 本地命中: CVE-2018-18852
+INFO:     127.0.0.1:49522 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:41200 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2018-18925
+NVD 本地命中: CVE-2018-19487
+INFO:     127.0.0.1:41202 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2018-8898
+NVD 本地命中: CVE-2019-0227
+NVD 本地命中: CVE-2019-10352
+NVD 本地命中: CVE-2019-12616
+INFO:     127.0.0.1:53408 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2019-12828
+INFO:     127.0.0.1:48080 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2019-13063
+INFO:     127.0.0.1:57646 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-13358
+INFO:     127.0.0.1:57652 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:44686 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44686 - "GET /api/input-history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44692 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44708 - "GET /api/tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44716 - "GET /api/knowledge-bases HTTP/1.1" 200 OK
+INFO:     127.0.0.1:44716 - "GET /api/tasks/5c4b9b6b5902/events HTTP/1.1" 200 OK
+INFO:     127.0.0.1:57062 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2019-13505
+NVD 本地命中: CVE-2019-15092
+INFO:     127.0.0.1:56068 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:49048 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-16068
+INFO:     127.0.0.1:49064 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:52928 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:35764 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:54012 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-16132
+INFO:     127.0.0.1:54014 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2019-19266
+INFO:     127.0.0.1:53336 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2019-19832
+INFO:     127.0.0.1:53306 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:49698 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49702 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:35982 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:55098 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2019-20139
+INFO:     127.0.0.1:50354 - "GET /api/tasks/5c4b9b6b5902 HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-3394
+NVD 本地命中: CVE-2019-3995
+INFO:     127.0.0.1:50364 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:35708 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+NVD 本地命中: CVE-2019-5533
+INFO:     127.0.0.1:52436 - "POST /api/tasks/5c4b9b6b5902/cancel HTTP/1.1" 200 OK
+INFO:     127.0.0.1:52442 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:59608 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:52634 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:33754 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:44656 - "GET /api/tasks/ HTTP/1.1" 307 Temporary Redirect
+INFO:     127.0.0.1:48000 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48002 - "POST /api/tasks HTTP/1.1" 200 OK
+INFO:     127.0.0.1:48008 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2007-4061
+NVD 本地命中: CVE-2007-3233
+NVD 本地命中: CVE-2013-2068
+NVD 本地命中: CVE-2001-0987
+NVD 本地命中: CVE-2014-8072
+NVD 本地命中: CVE-2012-0551
+NVD 本地命中: CVE-2003-1086
+NVD 本地命中: CVE-2013-2572
+NVD 本地命中: CVE-2014-8739
+NVD 本地命中: CVE-2015-2755
+NVD 本地命中: CVE-2015-6835
+NVD 本地命中: CVE-2017-3066
+NVD 本地命中: CVE-2017-5173
+NVD 本地命中: CVE-2018-10653
+INFO:     127.0.0.1:49784 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49790 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2018-15711
+NVD 本地命中: CVE-2018-16357
+NVD 本地命中: CVE-2018-16621
+NVD 本地命中: CVE-2018-16946
+NVD 本地命中: CVE-2018-18852
+NVD 本地命中: CVE-2018-18925
+INFO:     127.0.0.1:36722 - "GET / HTTP/1.1" 200 OK
+INFO:     127.0.0.1:36722 - "GET /api/input-history HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38728 - "GET /api/tasks HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2018-19487
+INFO:     127.0.0.1:38736 - "GET /api/knowledge-bases HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38744 - "GET /api/health HTTP/1.1" 200 OK
+INFO:     127.0.0.1:38736 - "GET /api/tasks/5742746fffda/events HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2018-8898
+NVD 本地命中: CVE-2019-0227
+NVD 本地命中: CVE-2019-10352
+NVD 本地命中: CVE-2019-12616
+INFO:     127.0.0.1:50662 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-12828
+NVD 本地命中: CVE-2019-13063
+NVD 本地命中: CVE-2019-13358
+NVD 本地命中: CVE-2019-13505
+NVD 本地命中: CVE-2019-15092
+NVD 本地命中: CVE-2019-16068
+NVD 本地命中: CVE-2019-16132
+INFO:     127.0.0.1:49482 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-19266
+NVD 本地命中: CVE-2019-19832
+INFO:     127.0.0.1:55664 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-20139
+INFO:     127.0.0.1:53736 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+INFO:     127.0.0.1:56222 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-3394
+NVD 本地命中: CVE-2019-3995
+INFO:     127.0.0.1:40292 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2019-5533
+NVD 本地命中: CVE-2019-7385
+NVD 本地命中: CVE-2019-9580
+NVD 本地命中: CVE-2020-10968
+NVD 本地命中: CVE-2020-11060
+INFO:     127.0.0.1:53412 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+INFO:     127.0.0.1:49884 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+NVD 本地命中: CVE-2020-11444
+NVD 本地命中: CVE-2020-11511
+NVD 本地命中: CVE-2020-11579
+INFO:     127.0.0.1:39034 - "GET /api/tasks/5742746fffda HTTP/1.1" 200 OK
+INFO:     127.0.0.1:50210 - "POST /api/tasks/5742746fffda/cancel HTTP/1.1" 200 OK

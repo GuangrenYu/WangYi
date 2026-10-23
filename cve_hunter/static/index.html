@@ -54,11 +54,12 @@
           <label class="switch-field"><input id="docker-enabled" type="checkbox"><span class="switch"></span><span>启用 Docker 环境</span></label>
         </div>
         <div class="field-group run-options">
-          <label for="target-ip">目标 IP</label>
+          <label for="target-ip">目标 IP/端口</label>
           <input id="target-ip" class="text-input" type="text" placeholder="使用服务端默认目标">
           <label class="check-field"><input id="local-only" type="checkbox"><span>仅使用本地知识库和 NVD</span></label>
-          <label class="check-field"><input id="allow-reference-links" type="checkbox"><span>允许通过 Tavily 访问 NVD 参考链接</span></label>
-          <small class="field-hint">不联网搜索参考资料；仅把本地 NVD、cvelist、PoC、PCAP 和上传内容交给模型生成候选。验证仍会向目标发包。</small>
+          <label class="check-field"><input id="fast-mode" type="checkbox"><span>快速批量：跳过参考链接抓取（不寻找新增来源 PoC）</span></label>
+          <label class="check-field"><input id="allow-reference-links" type="checkbox" checked><span>允许读取 NVD 参考链接与相关来源（共享时间预算）</span></label>
+          <small class="field-hint">快速批量模式在本地来源和 Nuclei 未命中后结束，不等待多个外部站点；取消勾选可运行完整远程检索。验证仍会向目标发包。</small>
           <label class="check-field"><input id="environment-discovery" type="checkbox"><span>发现复现环境候选（可选）</span></label>
           <small class="field-hint">默认直接使用目标 IP；开启后才查找复现环境。</small>
         </div>
@@ -127,6 +128,6 @@
       </div>
     </section>
   </main>
-  <script src="/static/app.js?v=nvd-year-progress"></script>
+  <script src="/static/app.js?v=compact-token-usage-20261015"></script>
 </body>
 </html>

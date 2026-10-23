@@ -1,0 +1,2247 @@
+{
+  "task_id": "1766cd5480a8",
+  "created_at": "2026-10-15T20:56:06.218606+08:00",
+  "updated_at": "2026-10-15T21:11:01.180941+08:00",
+  "status": "cancelled",
+  "timezone": "Asia/Shanghai",
+  "usage": {
+    "calls": 123,
+    "cache_hits": 0,
+    "reported_tokens": 453735,
+    "input_tokens": 299944,
+    "output_tokens": 153791,
+    "cached_input_tokens": 192640,
+    "reasoning_tokens": 139424,
+    "unknown_calls": 26,
+    "pending_calls": 0,
+    "errors": 21,
+    "usage_incomplete": true,
+    "by_purpose": {
+      "vulnerability_classification": {
+        "calls": 34,
+        "cache_hits": 0,
+        "reported_tokens": 96368,
+        "input_tokens": 76693,
+        "output_tokens": 19675,
+        "cached_input_tokens": 58624,
+        "reasoning_tokens": 17291,
+        "unknown_calls": 2,
+        "pending_calls": 0,
+        "errors": 2,
+        "usage_incomplete": true
+      },
+      "poc_from_refs_yaml": {
+        "calls": 7,
+        "cache_hits": 0,
+        "reported_tokens": 24377,
+        "input_tokens": 21820,
+        "output_tokens": 2557,
+        "cached_input_tokens": 6144,
+        "reasoning_tokens": 2533,
+        "unknown_calls": 4,
+        "pending_calls": 0,
+        "errors": 4,
+        "usage_incomplete": true
+      },
+      "critic_agent": {
+        "calls": 82,
+        "cache_hits": 0,
+        "reported_tokens": 332990,
+        "input_tokens": 201431,
+        "output_tokens": 131559,
+        "cached_input_tokens": 127872,
+        "reasoning_tokens": 119600,
+        "unknown_calls": 20,
+        "pending_calls": 0,
+        "errors": 15,
+        "usage_incomplete": true
+      }
+    }
+  },
+  "notes": [
+    "Totals use relay-reported total_tokens; token categories may overlap.",
+    "Cached input is part of input tokens. Reasoning may already be in output or total.",
+    "Unknown and pending calls may incur charges; missing usage is never treated as a known zero."
+  ],
+  "cves": {
+    "CVE-2001-0987": {
+      "status": "failed",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 2730,
+        "input_tokens": 2308,
+        "output_tokens": 422,
+        "cached_input_tokens": 2048,
+        "reasoning_tokens": 351,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2730,
+            "input_tokens": 2308,
+            "output_tokens": 422,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 351,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "ae9fa3b5d47744fe9280ccc60405d6aa"
+      }
+    },
+    "CVE-2003-1086": {
+      "status": "success",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3168,
+        "input_tokens": 2615,
+        "output_tokens": 553,
+        "cached_input_tokens": 896,
+        "reasoning_tokens": 485,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3168,
+            "input_tokens": 2615,
+            "output_tokens": 553,
+            "cached_input_tokens": 896,
+            "reasoning_tokens": 485,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "b63674a6110b4336a2ab4f5c085520e0"
+      }
+    },
+    "CVE-2007-3233": {
+      "status": "failed",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 2792,
+        "input_tokens": 2310,
+        "output_tokens": 482,
+        "cached_input_tokens": 2048,
+        "reasoning_tokens": 421,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2792,
+            "input_tokens": 2310,
+            "output_tokens": 482,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 421,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "ef19de0542654dd696514eba7a93c3e9"
+      }
+    },
+    "CVE-2007-4061": {
+      "status": "success",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3156,
+        "input_tokens": 2650,
+        "output_tokens": 506,
+        "cached_input_tokens": 2432,
+        "reasoning_tokens": 426,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3156,
+            "input_tokens": 2650,
+            "output_tokens": 506,
+            "cached_input_tokens": 2432,
+            "reasoning_tokens": 426,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "f2c2a475d6ea4b89a78406eb093fd2dc"
+      }
+    },
+    "CVE-2012-0551": {
+      "status": "failed",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3018,
+        "input_tokens": 2340,
+        "output_tokens": 678,
+        "cached_input_tokens": 128,
+        "reasoning_tokens": 613,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3018,
+            "input_tokens": 2340,
+            "output_tokens": 678,
+            "cached_input_tokens": 128,
+            "reasoning_tokens": 613,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "98327017116b49e0948c74f3c0486c27"
+      }
+    },
+    "CVE-2013-2068": {
+      "status": "failed",
+      "usage": {
+        "calls": 5,
+        "cache_hits": 0,
+        "reported_tokens": 14685,
+        "input_tokens": 8954,
+        "output_tokens": 5731,
+        "cached_input_tokens": 6272,
+        "reasoning_tokens": 5184,
+        "unknown_calls": 2,
+        "pending_calls": 0,
+        "errors": 2,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2999,
+            "input_tokens": 2326,
+            "output_tokens": 673,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 585,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 11686,
+            "input_tokens": 6628,
+            "output_tokens": 5058,
+            "cached_input_tokens": 4224,
+            "reasoning_tokens": 4599,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "fa11c09a420a45998948ccfa5b4ef69f"
+      }
+    },
+    "CVE-2013-2572": {
+      "status": "failed",
+      "usage": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 18071,
+        "input_tokens": 12359,
+        "output_tokens": 5712,
+        "cached_input_tokens": 9088,
+        "reasoning_tokens": 5061,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3052,
+            "input_tokens": 2630,
+            "output_tokens": 422,
+            "cached_input_tokens": 2560,
+            "reasoning_tokens": 353,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 15019,
+            "input_tokens": 9729,
+            "output_tokens": 5290,
+            "cached_input_tokens": 6528,
+            "reasoning_tokens": 4708,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "a354748779b64fec802e9f7a87ff2cf1"
+      }
+    },
+    "CVE-2014-8072": {
+      "status": "failed",
+      "usage": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 18845,
+        "input_tokens": 11756,
+        "output_tokens": 7089,
+        "cached_input_tokens": 8576,
+        "reasoning_tokens": 6518,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2898,
+            "input_tokens": 2296,
+            "output_tokens": 602,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 545,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 15947,
+            "input_tokens": 9460,
+            "output_tokens": 6487,
+            "cached_input_tokens": 6528,
+            "reasoning_tokens": 5973,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "f9cd96d23626420a83ee3af273e5294c"
+      }
+    },
+    "CVE-2014-8739": {
+      "status": "failed",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 2872,
+        "input_tokens": 2376,
+        "output_tokens": 496,
+        "cached_input_tokens": 2048,
+        "reasoning_tokens": 418,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2872,
+            "input_tokens": 2376,
+            "output_tokens": 496,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 418,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "331e9128807c4d7a9aeb1644402495f6"
+      }
+    },
+    "CVE-2015-2755": {
+      "status": "success",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3220,
+        "input_tokens": 2665,
+        "output_tokens": 555,
+        "cached_input_tokens": 896,
+        "reasoning_tokens": 485,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3220,
+            "input_tokens": 2665,
+            "output_tokens": 555,
+            "cached_input_tokens": 896,
+            "reasoning_tokens": 485,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "f035463a52104432add06b6d24b21a91"
+      }
+    },
+    "CVE-2015-6835": {
+      "status": "failed",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3288,
+        "input_tokens": 2346,
+        "output_tokens": 942,
+        "cached_input_tokens": 2176,
+        "reasoning_tokens": 850,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3288,
+            "input_tokens": 2346,
+            "output_tokens": 942,
+            "cached_input_tokens": 2176,
+            "reasoning_tokens": 850,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "828dae6646ca4782985635aeeaaefcff"
+      }
+    },
+    "CVE-2017-3066": {
+      "status": "failed",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 3022,
+        "input_tokens": 2380,
+        "output_tokens": 642,
+        "cached_input_tokens": 2176,
+        "reasoning_tokens": 541,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3022,
+            "input_tokens": 2380,
+            "output_tokens": 642,
+            "cached_input_tokens": 2176,
+            "reasoning_tokens": 541,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "d9d1ae6d60754508b249a190b6a12f90"
+      }
+    },
+    "CVE-2017-5173": {
+      "status": "success",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3083,
+        "input_tokens": 2357,
+        "output_tokens": 726,
+        "cached_input_tokens": 2176,
+        "reasoning_tokens": 642,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3083,
+            "input_tokens": 2357,
+            "output_tokens": 726,
+            "cached_input_tokens": 2176,
+            "reasoning_tokens": 642,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "697ff0b901804dc5923ca564c9c6db00"
+      }
+    },
+    "CVE-2018-10653": {
+      "status": "failed",
+      "usage": {
+        "calls": 7,
+        "cache_hits": 0,
+        "reported_tokens": 23097,
+        "input_tokens": 15537,
+        "output_tokens": 7560,
+        "cached_input_tokens": 10624,
+        "reasoning_tokens": 6824,
+        "unknown_calls": 2,
+        "pending_calls": 0,
+        "errors": 2,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2888,
+            "input_tokens": 2301,
+            "output_tokens": 587,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 503,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 6,
+            "cache_hits": 0,
+            "reported_tokens": 20209,
+            "input_tokens": 13236,
+            "output_tokens": 6973,
+            "cached_input_tokens": 8576,
+            "reasoning_tokens": 6321,
+            "unknown_calls": 2,
+            "pending_calls": 0,
+            "errors": 2,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "cfb7df4eadea4d98945efc52a56df17e"
+      }
+    },
+    "CVE-2018-15711": {
+      "status": "failed",
+      "usage": {
+        "calls": 7,
+        "cache_hits": 0,
+        "reported_tokens": 34249,
+        "input_tokens": 21135,
+        "output_tokens": 13114,
+        "cached_input_tokens": 12928,
+        "reasoning_tokens": 11855,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3036,
+            "input_tokens": 2310,
+            "output_tokens": 726,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 641,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 6,
+            "cache_hits": 0,
+            "reported_tokens": 31213,
+            "input_tokens": 18825,
+            "output_tokens": 12388,
+            "cached_input_tokens": 10880,
+            "reasoning_tokens": 11214,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "f305111e97c14c679f244dc5a15e4259"
+      }
+    },
+    "CVE-2018-16357": {
+      "status": "failed",
+      "usage": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 17667,
+        "input_tokens": 11553,
+        "output_tokens": 6114,
+        "cached_input_tokens": 8448,
+        "reasoning_tokens": 5595,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2721,
+            "input_tokens": 2292,
+            "output_tokens": 429,
+            "cached_input_tokens": 2176,
+            "reasoning_tokens": 374,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 14946,
+            "input_tokens": 9261,
+            "output_tokens": 5685,
+            "cached_input_tokens": 6272,
+            "reasoning_tokens": 5221,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "8bbd4e30f04d428f8a366a09a6af1a9d"
+      }
+    },
+    "CVE-2018-16621": {
+      "status": "failed",
+      "usage": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 2855,
+        "input_tokens": 2283,
+        "output_tokens": 572,
+        "cached_input_tokens": 2048,
+        "reasoning_tokens": 512,
+        "unknown_calls": 3,
+        "pending_calls": 0,
+        "errors": 3,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2855,
+            "input_tokens": 2283,
+            "output_tokens": 572,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 512,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 3,
+            "pending_calls": 0,
+            "errors": 3,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "fa3953c472af421fb160ed5ae3759d59"
+      }
+    },
+    "CVE-2018-16946": {
+      "status": "failed",
+      "usage": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 19620,
+        "input_tokens": 12016,
+        "output_tokens": 7604,
+        "cached_input_tokens": 8576,
+        "reasoning_tokens": 6949,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3001,
+            "input_tokens": 2381,
+            "output_tokens": 620,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 543,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 16619,
+            "input_tokens": 9635,
+            "output_tokens": 6984,
+            "cached_input_tokens": 6528,
+            "reasoning_tokens": 6406,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "64fb0596907143209c06b5c36f901c38"
+      }
+    },
+    "CVE-2018-18852": {
+      "status": "failed",
+      "usage": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 18584,
+        "input_tokens": 11795,
+        "output_tokens": 6789,
+        "cached_input_tokens": 8576,
+        "reasoning_tokens": 6237,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2753,
+            "input_tokens": 2327,
+            "output_tokens": 426,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 367,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 15831,
+            "input_tokens": 9468,
+            "output_tokens": 6363,
+            "cached_input_tokens": 6528,
+            "reasoning_tokens": 5870,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "9d183c42a4be41e690aa5ce537c9ca70"
+      }
+    },
+    "CVE-2018-18925": {
+      "status": "failed",
+      "usage": {
+        "calls": 2,
+        "cache_hits": 0,
+        "reported_tokens": 3136,
+        "input_tokens": 2330,
+        "output_tokens": 806,
+        "cached_input_tokens": 2176,
+        "reasoning_tokens": 723,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3136,
+            "input_tokens": 2330,
+            "output_tokens": 806,
+            "cached_input_tokens": 2176,
+            "reasoning_tokens": 723,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "eb46492adadb48cba1dbbfe4b3e6bbb8"
+      }
+    },
+    "CVE-2018-19487": {
+      "status": "failed",
+      "usage": {
+        "calls": 6,
+        "cache_hits": 0,
+        "reported_tokens": 29509,
+        "input_tokens": 18252,
+        "output_tokens": 11257,
+        "cached_input_tokens": 11392,
+        "reasoning_tokens": 10105,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2941,
+            "input_tokens": 2320,
+            "output_tokens": 621,
+            "cached_input_tokens": 128,
+            "reasoning_tokens": 546,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 5,
+            "cache_hits": 0,
+            "reported_tokens": 26568,
+            "input_tokens": 15932,
+            "output_tokens": 10636,
+            "cached_input_tokens": 11264,
+            "reasoning_tokens": 9559,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "cbd1c59d3bba48a6b45d8b4396e37f55"
+      }
+    },
+    "CVE-2018-8898": {
+      "status": "success",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3091,
+        "input_tokens": 2360,
+        "output_tokens": 731,
+        "cached_input_tokens": 2048,
+        "reasoning_tokens": 665,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3091,
+            "input_tokens": 2360,
+            "output_tokens": 731,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 665,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "7f32fc412b1742868e756294e159793a"
+      }
+    },
+    "CVE-2019-0227": {
+      "status": "failed",
+      "usage": {
+        "calls": 5,
+        "cache_hits": 0,
+        "reported_tokens": 21295,
+        "input_tokens": 12731,
+        "output_tokens": 8564,
+        "cached_input_tokens": 8576,
+        "reasoning_tokens": 7955,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3024,
+            "input_tokens": 2358,
+            "output_tokens": 666,
+            "cached_input_tokens": 2176,
+            "reasoning_tokens": 593,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 4,
+            "cache_hits": 0,
+            "reported_tokens": 18271,
+            "input_tokens": 10373,
+            "output_tokens": 7898,
+            "cached_input_tokens": 6400,
+            "reasoning_tokens": 7362,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "e67c3bebbd2c4c27807e2c330643fdb0"
+      }
+    },
+    "CVE-2019-10352": {
+      "status": "failed",
+      "usage": {
+        "calls": 7,
+        "cache_hits": 0,
+        "reported_tokens": 20864,
+        "input_tokens": 13156,
+        "output_tokens": 7708,
+        "cached_input_tokens": 8576,
+        "reasoning_tokens": 6970,
+        "unknown_calls": 3,
+        "pending_calls": 0,
+        "errors": 3,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3145,
+            "input_tokens": 2641,
+            "output_tokens": 504,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 405,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 6,
+            "cache_hits": 0,
+            "reported_tokens": 17719,
+            "input_tokens": 10515,
+            "output_tokens": 7204,
+            "cached_input_tokens": 6528,
+            "reasoning_tokens": 6565,
+            "unknown_calls": 3,
+            "pending_calls": 0,
+            "errors": 3,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "82e5e2b904c94cd1b2437b52e79fbccb"
+      }
+    },
+    "CVE-2019-12616": {
+      "status": "cancelled",
+      "usage": {
+        "calls": 7,
+        "cache_hits": 0,
+        "reported_tokens": 11500,
+        "input_tokens": 6643,
+        "output_tokens": 4857,
+        "cached_input_tokens": 4352,
+        "reasoning_tokens": 4386,
+        "unknown_calls": 5,
+        "pending_calls": 0,
+        "errors": 4,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          },
+          "critic_agent": {
+            "calls": 6,
+            "cache_hits": 0,
+            "reported_tokens": 11500,
+            "input_tokens": 6643,
+            "output_tokens": 4857,
+            "cached_input_tokens": 4352,
+            "reasoning_tokens": 4386,
+            "unknown_calls": 4,
+            "pending_calls": 0,
+            "errors": 3,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "30fe6f6061e44c75beb01b8291194380"
+      }
+    },
+    "CVE-2019-12828": {
+      "status": "failed",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 3420,
+        "input_tokens": 2337,
+        "output_tokens": 1083,
+        "cached_input_tokens": 2176,
+        "reasoning_tokens": 993,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3420,
+            "input_tokens": 2337,
+            "output_tokens": 1083,
+            "cached_input_tokens": 2176,
+            "reasoning_tokens": 993,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "686ec73aa55f4321b25c0990a23d3ca8"
+      }
+    },
+    "CVE-2019-13063": {
+      "status": "cancelled",
+      "usage": {
+        "calls": 6,
+        "cache_hits": 0,
+        "reported_tokens": 18713,
+        "input_tokens": 12206,
+        "output_tokens": 6507,
+        "cached_input_tokens": 6400,
+        "reasoning_tokens": 5821,
+        "unknown_calls": 2,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3037,
+            "input_tokens": 2368,
+            "output_tokens": 669,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 609,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          },
+          "critic_agent": {
+            "calls": 4,
+            "cache_hits": 0,
+            "reported_tokens": 15676,
+            "input_tokens": 9838,
+            "output_tokens": 5838,
+            "cached_input_tokens": 4352,
+            "reasoning_tokens": 5212,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "aa6fbee899944fcaa1b5025db5943af4"
+      }
+    },
+    "CVE-2019-13358": {
+      "status": "cancelled",
+      "usage": {
+        "calls": 9,
+        "cache_hits": 0,
+        "reported_tokens": 37819,
+        "input_tokens": 26327,
+        "output_tokens": 11492,
+        "cached_input_tokens": 14720,
+        "reasoning_tokens": 10471,
+        "unknown_calls": 2,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2972,
+            "input_tokens": 2316,
+            "output_tokens": 656,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 577,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 8195,
+            "input_tokens": 7349,
+            "output_tokens": 846,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 838,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 7,
+            "cache_hits": 0,
+            "reported_tokens": 26652,
+            "input_tokens": 16662,
+            "output_tokens": 9990,
+            "cached_input_tokens": 10624,
+            "reasoning_tokens": 9056,
+            "unknown_calls": 2,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "067b551c09f7498691189770668855ff"
+      }
+    },
+    "CVE-2019-13505": {
+      "status": "cancelled",
+      "usage": {
+        "calls": 7,
+        "cache_hits": 0,
+        "reported_tokens": 36020,
+        "input_tokens": 24501,
+        "output_tokens": 11519,
+        "cached_input_tokens": 12928,
+        "reasoning_tokens": 10480,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 9027,
+            "input_tokens": 8261,
+            "output_tokens": 766,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 758,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 5,
+            "cache_hits": 0,
+            "reported_tokens": 26993,
+            "input_tokens": 16240,
+            "output_tokens": 10753,
+            "cached_input_tokens": 10880,
+            "reasoning_tokens": 9722,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "2778d9450aad43be8e257b925f9276db"
+      }
+    },
+    "CVE-2019-15092": {
+      "status": "failed",
+      "usage": {
+        "calls": 6,
+        "cache_hits": 0,
+        "reported_tokens": 24364,
+        "input_tokens": 15348,
+        "output_tokens": 9016,
+        "cached_input_tokens": 8832,
+        "reasoning_tokens": 8171,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 1,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3320,
+            "input_tokens": 2332,
+            "output_tokens": 988,
+            "cached_input_tokens": 2176,
+            "reasoning_tokens": 897,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 5,
+            "cache_hits": 0,
+            "reported_tokens": 21044,
+            "input_tokens": 13016,
+            "output_tokens": 8028,
+            "cached_input_tokens": 6656,
+            "reasoning_tokens": 7274,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 1,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "36403619d5544dce8da572563f4c0e4e"
+      }
+    },
+    "CVE-2019-16068": {
+      "status": "cancelled",
+      "usage": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 18529,
+        "input_tokens": 11760,
+        "output_tokens": 6769,
+        "cached_input_tokens": 6656,
+        "reasoning_tokens": 6107,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2826,
+            "input_tokens": 2328,
+            "output_tokens": 498,
+            "cached_input_tokens": 128,
+            "reasoning_tokens": 434,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 15703,
+            "input_tokens": 9432,
+            "output_tokens": 6271,
+            "cached_input_tokens": 6528,
+            "reasoning_tokens": 5673,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "fefc62ba82d94c679bc40755d9bff712"
+      }
+    },
+    "CVE-2019-16132": {
+      "status": "cancelled",
+      "usage": {
+        "calls": 4,
+        "cache_hits": 0,
+        "reported_tokens": 14332,
+        "input_tokens": 8847,
+        "output_tokens": 5485,
+        "cached_input_tokens": 6272,
+        "reasoning_tokens": 5038,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2938,
+            "input_tokens": 2309,
+            "output_tokens": 629,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 559,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 3,
+            "cache_hits": 0,
+            "reported_tokens": 11394,
+            "input_tokens": 6538,
+            "output_tokens": 4856,
+            "cached_input_tokens": 4224,
+            "reasoning_tokens": 4479,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "904ef6593c504fcaa11c2ee9507bc2e7"
+      }
+    },
+    "CVE-2019-19266": {
+      "status": "cancelled",
+      "usage": {
+        "calls": 3,
+        "cache_hits": 0,
+        "reported_tokens": 10172,
+        "input_tokens": 8813,
+        "output_tokens": 1359,
+        "cached_input_tokens": 4480,
+        "reasoning_tokens": 1287,
+        "unknown_calls": 1,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": true,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 3017,
+            "input_tokens": 2603,
+            "output_tokens": 414,
+            "cached_input_tokens": 2432,
+            "reasoning_tokens": 350,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "poc_from_refs_yaml": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 7155,
+            "input_tokens": 6210,
+            "output_tokens": 945,
+            "cached_input_tokens": 2048,
+            "reasoning_tokens": 937,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          },
+          "critic_agent": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cached_input_tokens": 0,
+            "reasoning_tokens": 0,
+            "unknown_calls": 1,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": true
+          }
+        },
+        "run_id": "89299be435d34dd683d549a962e183d0"
+      }
+    },
+    "CVE-2019-19832": {
+      "status": "cancelled",
+      "usage": {
+        "calls": 1,
+        "cache_hits": 0,
+        "reported_tokens": 2949,
+        "input_tokens": 2598,
+        "output_tokens": 351,
+        "cached_input_tokens": 896,
+        "reasoning_tokens": 285,
+        "unknown_calls": 0,
+        "pending_calls": 0,
+        "errors": 0,
+        "usage_incomplete": false,
+        "by_purpose": {
+          "vulnerability_classification": {
+            "calls": 1,
+            "cache_hits": 0,
+            "reported_tokens": 2949,
+            "input_tokens": 2598,
+            "output_tokens": 351,
+            "cached_input_tokens": 896,
+            "reasoning_tokens": 285,
+            "unknown_calls": 0,
+            "pending_calls": 0,
+            "errors": 0,
+            "usage_incomplete": false
+          }
+        },
+        "run_id": "a10c807337ca46e1bb4c33c67b4030af"
+      }
+    },
+    "CVE-2019-20139": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2019-3394": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2019-3995": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2019-5533": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2019-7385": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2019-9580": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-10968": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-11060": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-11444": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-11511": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-11579": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-11798": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-12078": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-13448": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-13569": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-13782": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-13852": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-13925": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-15943": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-16952": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-17143": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-24219": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-24577": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-27130": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-27231": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-27232": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-27235": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-27236": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-27241": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-28074": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-28184": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-35228": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-35230": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-36155": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-4280": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-5780": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-6008": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-6286": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-6843": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-7361": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-7799": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-7991": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-8429": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2020-8947": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-20023": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-21346": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-21347": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-21350": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-21425": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-24239": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-26885": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-28152": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-28242": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-28482": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-31181": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-31474": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-31601": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-3164": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-31682": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-3239": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-3297": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-3317": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-41408": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-41746": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-44832": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2021-46441": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0320": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0633": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0760": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0769": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0773": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0784": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0787": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0826": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-0827": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-1013": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-1429": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-1993": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-21145": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-21234": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-22242": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-22245": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-22246": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-22909": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-23277": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-23940": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-24760": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-25064": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-25084": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-27061": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-27064": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-27226": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-27349": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-27351": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-27352": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-27357": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-27643": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-28021": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-28346": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-30708": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-31680": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-32092": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-32300": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-32301": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-33107": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-40871": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-44645": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-45205": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-46463": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2022-47615": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-0814": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-1578": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-27025": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-27997": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-2928": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-31059": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-32243": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-33730": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-36846": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-39147": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-4172": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-42820": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-44827": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-4521": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2023-4596": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-0490": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-10124": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-10131": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-10400": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-10732": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-12351": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-1253": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-21793": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-23052": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-25153": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-2622": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-27765": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-31848": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-3552": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-3685": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-37084": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-41107": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-41319": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-42676": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-45436": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-51751": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-54152": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-5932": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-6940": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-7037": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-7327": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2024-8060": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-0786": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-0788": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-0789": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-0791": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-0792": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-0793": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-1106": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-1335": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-1336": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-1535": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-1844": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-1890": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-1958": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-2112": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-25064": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-25513": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-25515": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-25517": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-3968": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-48703": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-49002": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-53770": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-6925": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-9606": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2025-9760": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2026-0599": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2026-0640": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2026-1420": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2026-3975": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2026-4043": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2026-4903": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2026-5981": {
+      "status": "cancelled",
+      "usage": {}
+    },
+    "CVE-2026-5982": {
+      "status": "cancelled",
+      "usage": {}
+    }
+  }
+}

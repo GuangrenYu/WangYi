@@ -15,14 +15,9 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from cve_hunter.tools.nvd import query_nvd
-from cve_hunter.tools.ref_cache import load_reference_cache, merge_reference_contents, save_reference_cache
-from cve_hunter.tools.web_extract import extract_url_content, extract_url_content_tavily
-
-
-def _extract(url: str, *, use_tavily: bool) -> dict:
-    if use_tavily:
-        return extract_url_content_tavily(url)
-    return extract_url_content(url)
+from cve_hunter.tools.ref_cache import load_reference_cache
+from cve_hunter.agents import run_reference_agent
+from cve_hunter.state import CVEState
 
 
 def prefetch_one(cve_id: str, *, use_tavily: bool, max_urls: int) -> dict:
@@ -38,35 +33,24 @@ def prefetch_one(cve_id: str, *, use_tavily: bool, max_urls: int) -> dict:
             "saved": 0,
         }
 
-    have = {str(item.get("url") or "") for item in cached}
-    missing = [url for url in refs if url not in have]
-    fetched: list[dict] = []
-    errors: list[str] = []
-    for url in missing:
-        result = _extract(url, use_tavily=use_tavily)
-        content = str(result.get("content") or "")
-        if content.strip():
-            fetched.append(
-                {
-                    "url": url,
-                    "title": str(result.get("title") or ""),
-                    "content": content[:8000],
-                }
-            )
-        elif result.get("error"):
-            errors.append(f"{url}: {result.get('error')}")
-
-    merged = merge_reference_contents(cached, fetched)
-    path = save_reference_cache(cve_id, merged) if merged else None
+    result = run_reference_agent(CVEState(
+        cve_id=cve_id, nvd_references=list(info.get("references") or []),
+        allow_reference_links=use_tavily,
+    ), max_urls=max_urls)
+    trace = result.get("trace", {}).get("data", {})
+    merged = load_reference_cache(cve_id)
     return {
         "cve_id": cve_id,
         "status": "ok" if merged else "empty",
         "nvd_refs": len(refs),
         "cached_before": len(cached),
-        "fetched": len(fetched),
+        "fetched": trace.get("fetched", 0),
         "saved": len(merged),
-        "path": str(path) if path else "",
-        "errors": errors[:3],
+        "path": trace.get("cache_path", ""),
+        "errors": result.get("errors", [])[:3],
+        "followup_pages": trace.get("followup_pages", 0),
+        "crawl_elapsed_sec": trace.get("crawl_elapsed_sec", 0),
+        "crawl_timed_out": trace.get("crawl_timed_out", False),
     }
 
 
